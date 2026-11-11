@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+server/wwwroot/
+server/data/
+server/appsettings.Local.json
+.tools/
+*.log
+.env
+**/node_modules.native-backup/
+**/package-lock.native-backup.json
+**/*.tsbuildinfo
