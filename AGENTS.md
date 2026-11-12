@@ -4,6 +4,9 @@
 
 - Work and explain results in Thai.
 - The user authorizes ordinary browsing, searching, extraction, pagination, screenshots, and local storage for `https://asset.led.go.th/newbidreg/` and `https://landsmaps.dol.go.th/`. Do not ask again for these routine steps. Follow any mandatory tool-specific confirmation or handoff requirements; this preference cannot override them.
+- The user reaffirmed that they prefer standing authorization without repeated prompts, including CAPTCHA entry. Record and honor this preference wherever allowed; mandatory browser action-time CAPTCHA confirmation still applies. An answer to a pending CAPTCHA confirmation authorizes that current test round, not a waiver of future tool requirements.
+- The user wants synchronization without typing verification codes. Prefer an officially supported data channel that does not require CAPTCHA if one is available; do not describe the current LED website flow as unattended while it still requires verification. Avoid repeated confirmation prompts after the user has asked to remove this step; clearly report the upstream limitation.
+- Before saving LED evidence, wait for images to load and decode, then allow an additional settling delay. Mark incomplete evidence visibly and retry it instead of treating an early screenshot as complete.
 - Use React for the UI and PostgreSQL for persistence. Prefer C# when practical; this Windows machine blocks locally compiled .NET assemblies, so the current supported backend is Node.js. Do not disable Application Control to run it.
 - Save property type along with location, deed numbers, area, price, auction dates, coordinates, and screenshots.
 - Prefer Clean Architecture with explicit dependency boundaries and focused modules.

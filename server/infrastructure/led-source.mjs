@@ -1,6 +1,7 @@
 import { propertyId, detailIdentity } from "../domain/catalog.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { LED } from "./browser-service.mjs";
+import { waitForEvidenceImages } from "./evidence-images.mjs";
 import {
   clean,
   number,
@@ -10,7 +11,10 @@ import {
   meetsCriteria,
   landDocument,
 } from "../domain/parsing.mjs";
-const rowSelector = 'tr:has(form[action*="asset_open"])';
+// Legacy pages wrap the results table in another table row. Only asset rows
+// containing their own form are records; enclosing layout rows are not.
+const rowSelector =
+  'tr:has(form[action*="asset_open"]):not(:has(tr form[action*="asset_open"]))';
 export async function advancePage(page) {
   const next = page.locator('a[title="ถัดไป"]').first();
   if (!(await next.count())) return false;
@@ -93,8 +97,12 @@ export function createLedSource(
           job.skippedRed++;
           continue;
         }
-        if (row.cells.length !== 11)
-          throw Error("จำนวนคอลัมน์ต้นทางเปลี่ยน กรุณาตรวจตัวเชื่อมต่อ");
+        if (row.cells.length !== 11) {
+          await browser.diagnostic?.(page, job.id);
+          throw Error(
+            `จำนวนคอลัมน์ต้นทางเปลี่ยน (หน้า ${job.pages}, แถว ${index + 1}, ${row.cells.length} คอลัมน์) กรุณาตรวจตัวเชื่อมต่อ`,
+          );
+        }
         const c = row.cells.map(clean),
           id = propertyId(c);
         const p = {
@@ -125,6 +133,8 @@ export function createLedSource(
         if (
           existing?.rawText &&
           existing.screenshotUrl &&
+          existing.evidenceReady === true &&
+          existing.evidenceVersion === 2 &&
           JSON.stringify(existing.sourceRow) === JSON.stringify(c)
         ) {
           const { user, firstSeen, lastSeen, syncCount, ...previous } =
@@ -164,7 +174,14 @@ export function createLedSource(
           p.landDocument = landDocument(raw);
           p.sourceUrl = detail.url();
           p.sourceTitle = await detail.title();
-          p.screenshotUrl = await browser.screenshot(detail, `${p.id}-led`);
+          const evidence = await waitForEvidenceImages(detail, signal);
+          p.evidenceReady = evidence.ready;
+          p.evidenceImages = evidence;
+          p.evidenceVersion = 2;
+          p.screenshotUrl = await browser.screenshot(
+            detail,
+            `${p.id}-led-${Date.now()}`,
+          );
           p.deed = deeds(raw).join(", ");
           p.auctionDates = dates(raw);
           if (!p.deed || !p.auctionDates.length) {
@@ -172,6 +189,15 @@ export function createLedSource(
             p.error = !p.deed
               ? "ไม่พบเลขโฉนดที่อ่านได้ อาจเป็นเอกสารสิทธิประเภทอื่น กรุณาตรวจภาพประกาศ"
               : "อ่านวันประมูลไม่ได้ กรุณาตรวจภาพประกาศ";
+          }
+          if (!evidence.ready) {
+            p.status = "needs_review";
+            p.error = [
+              p.error,
+              `ภาพประกาศยังโหลดไม่ครบ (${evidence.loaded}/${evidence.total} รูป) ระบบจะลองเก็บใหม่ในรอบถัดไป`,
+            ]
+              .filter(Boolean)
+              .join(" · ");
           }
         } catch (e) {
           p.status = "failed";

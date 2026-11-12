@@ -7,6 +7,24 @@ import {
   advancePage,
 } from "../server/infrastructure/led-source.mjs";
 import { propertyId } from "../server/domain/catalog.mjs";
+test("nested layout rows are not counted or opened as property records", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<table><tr><td><table><tr><td><form action="asset_open.asp"></form>asset one</td><td>value</td></tr><tr><td><form action="asset_open.asp"></form>asset two</td><td>value</td></tr></table></td></tr></table>',
+    );
+    const rows = await readRows(page);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((r) => r.cells.length),
+      [2, 2],
+    );
+    assert.equal(rows[1].cells[0], "asset two");
+  } finally {
+    await browser.close();
+  }
+});
 test("pagination waits for changed rows without requiring document navigation", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -74,6 +92,8 @@ test("unchanged known properties skip detail navigation and screenshots", async 
       id: propertyId(cells),
       rawText: "saved detail",
       screenshotUrl: "/evidence/fixture.png",
+      evidenceReady: true,
+      evidenceVersion: 2,
       sourceRow: cells,
       status: "located",
       deed: "123",

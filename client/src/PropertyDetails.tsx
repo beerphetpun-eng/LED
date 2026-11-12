@@ -213,6 +213,15 @@ export function PropertyDetails({
             </span>
           </button>
         )}
+        {p.screenshotUrl && (
+          <p className="small muted">
+            {p.evidenceReady
+              ? `ตรวจรูปในหน้าประกาศก่อนแคปแล้ว ${p.evidenceImages?.loaded ?? ""}/${p.evidenceImages?.total ?? ""} รูป`
+              : p.evidenceReady === false
+                ? "ภาพประกาศยังโหลดไม่ครบ รอเก็บใหม่ในการซิงค์ถัดไป"
+                : "ภาพเดิม รอตรวจสอบและเก็บใหม่ในการซิงค์ถัดไป"}
+          </p>
+        )}
         <h3>หลักฐาน LandsMaps</h3>
         {p.parcels.length === 0 && (
           <p className="muted">ยังไม่มีพิกัดที่ยืนยันได้</p>

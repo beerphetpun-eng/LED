@@ -45,6 +45,8 @@ export type Property = {
   areaText: string;
   auctionDates: string[];
   screenshotUrl: string;
+  evidenceReady?: boolean;
+  evidenceImages?: { total: number; loaded: number; checkedAt: string };
   parcels: Parcel[];
   status: string;
   error?: string;

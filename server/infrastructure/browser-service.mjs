@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { number, validateValues } from "../domain/parsing.mjs";
@@ -219,6 +219,13 @@ export class BrowserService {
       timeout: 30000,
     });
     return "/evidence/" + name + ".png";
+  }
+  async diagnostic(page, runId) {
+    const name = "diagnostic-" + String(runId).replace(/[^a-zA-Z0-9_-]/g, "");
+    await writeFile(
+      path.join(root, "data", name + ".html"),
+      await page.content(),
+    );
   }
   async close() {
     await this.browser?.close();
