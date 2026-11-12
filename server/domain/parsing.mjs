@@ -18,6 +18,21 @@ export function area(c) {
     ? n[0] * 400 + n[1] * 100 + n[2]
     : null;
 }
+export function propertyArea(c) {
+  if (/ห้องชุด/.test(c[3])) {
+    const sqm = number(c[6]);
+    return {
+      areaSqWa: sqm === null ? null : sqm / 4,
+      areaText: `${c[6]} ตร.ม. (พื้นที่ห้องชุด)`,
+      areaUnit: "sqm",
+    };
+  }
+  return {
+    areaSqWa: area(c),
+    areaText: `${c[4]} ไร่ ${c[5]} งาน ${c[6]} ตร.วา`,
+    areaUnit: "sqwa",
+  };
+}
 export function deeds(text) {
   const lines = [
     ...text.matchAll(

@@ -3,6 +3,31 @@ import { LANDS } from "./browser-service.mjs";
 import { clean, district, coordinates } from "../domain/parsing.mjs";
 import { SourceUnavailableError } from "../domain/errors.mjs";
 export function createLandsMapsGeocoder(browser) {
+  async function waitForBackground(page, signal) {
+    let loaded = true;
+    try {
+      await page.waitForFunction(
+        () =>
+          typeof viewer !== "undefined" &&
+          viewer.scene?.globe?.tilesLoaded === true,
+        null,
+        { timeout: 45000 },
+      );
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll("img")]
+            .filter((i) => i.getBoundingClientRect().width > 100)
+            .every((i) => i.complete && i.naturalWidth > 0),
+        null,
+        { timeout: 15000 },
+      );
+    } catch {
+      loaded = false;
+    }
+    signal.throwIfAborted();
+    await delay(4000, undefined, { signal });
+    return loaded;
+  }
   const options = async (p, selector) =>
     p
       .locator(selector)
@@ -25,16 +50,8 @@ export function createLandsMapsGeocoder(browser) {
       );
     }
     signal.throwIfAborted();
-    const cookie = page.getByRole("button", {
-      name: "ปฏิเสธทั้งหมด",
-      exact: true,
-    });
-    if (await cookie.isVisible()) await cookie.click();
-    const news = page
-      .locator("#modal_news")
-      .getByRole("button", { name: "ปิดหน้าต่าง", exact: true })
-      .first();
-    if (await news.isVisible()) await news.click();
+    // landsPage registers overlay handlers. Clicking their dismiss controls here
+    // would trigger the same handler twice and wait for an already-closed button.
     const provinces = await options(page, "#cbprovince"),
       province = provinces.find(
         (x) => clean(x.label) === clean(record.province),
@@ -72,15 +89,43 @@ export function createLandsMapsGeocoder(browser) {
           (record.subdistrict && !panel.includes(clean(record.subdistrict)))
         )
           throw Error("พื้นที่ผลค้นหาไม่ตรงกับประกาศ ต้องตรวจสอบด้วยตนเอง");
+        const backgroundReady = await waitForBackground(page, signal);
+        const evidenceUrl = await browser.screenshot(
+          page,
+          `${record.id}-lands-${deed}`,
+        );
+        let mapEvidenceUrl = null,
+          captureWarning = "";
+        try {
+          await page
+            .locator('button[onclick="closeinfo()"]:visible')
+            .first()
+            .click();
+          await page
+            .locator("#demo1")
+            .waitFor({ state: "hidden", timeout: 10000 });
+          await delay(2500, undefined, { signal });
+          mapEvidenceUrl = await browser.screenshot(
+            page,
+            `${record.id}-lands-${deed}-map`,
+          );
+        } catch (e) {
+          signal.throwIfAborted();
+          captureWarning = " · ปิดกล่องข้อมูลเพื่อเก็บภาพแผนที่ไม่สำเร็จ";
+        }
         return {
           deed,
           ...coord,
           status: "located",
-          evidenceUrl: await browser.screenshot(
-            page,
-            `${jobId}-${record.id}-lands-${deed}`,
-          ),
-          note: "ค้นด้วยจังหวัด อำเภอ และเลขโฉนด; LandsMaps อาจปิดบังบางหลักของเลขโฉนดในผลลัพธ์",
+          evidenceUrl,
+          mapEvidenceUrl,
+          backgroundReady,
+          note:
+            "ค้นด้วยจังหวัด อำเภอ และเลขโฉนด; LandsMaps อาจปิดบังบางหลักของเลขโฉนด" +
+            (backgroundReady
+              ? ""
+              : " · ภาพพื้นหลังโหลดไม่ครบภายในเวลาที่กำหนด") +
+            captureWarning,
         };
       }
       const body = await page.innerText("body");

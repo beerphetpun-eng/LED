@@ -27,3 +27,14 @@
 - Read filter choices from the source. Detect structural source changes and report them clearly.
 - Use exact parcel search and save evidence. Avoid fuzzy location guesses and automatic CAPTCHA solving.
 - New commits: `feat(scope): ...`, `fix(scope): ...`, `refactor(scope): ...`, `test(scope): ...`, `docs(scope): ...`, or `chore(scope): ...`.
+
+## Catalog and continuous sync (2026-11-12)
+
+- The user also authorizes read-only public access to `https://web.facebook.com/ledcm2` and saving relevant auction post images locally. Do not ask again for routine access. Do not post, react, or alter accounts.
+- Sync scopes contain only provinces and districts with multiple selection. Default to Chiang Mai / Mueang Chiang Mai. Display filters are independent database queries, never source search conditions.
+- Upsert by stable source identity; never overwrite user bookmarks, 0–5 stars, comments, manual auction status, or deletion protection with source data.
+- Delete expired unprotected records and their unreferenced image files after the last auction date plus one calendar month in Asia/Bangkok. Preserve invalid/unknown schedules. Explicit protection always wins; configurable engagement/bookmark exceptions apply.
+- Keep sync failures and CAPTCHA waiting visible at the top. A scheduler does not remove upstream human verification requirements. No automatic CAPTCHA solving.
+- LandsMaps evidence includes the details view and a second map view after closing the parcel popup, with a bounded wait for background imagery and an honest warning on failure.
+- Facebook date matching may return complete images. Never claim a case/row match without verifying it, and never change manual auction status from inferred Facebook text.
+- Latest user clarification: sync weekly (168 hours). Only the explicit “ห้ามลบอัตโนมัติ” flag protects expired records by default; stars/bookmarks/comments alone do not. Skip re-opening details and re-downloading images when an existing source row is unchanged; refresh changed rows in place and preserve user notes.

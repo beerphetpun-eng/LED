@@ -16,6 +16,9 @@ try {
     new AbortController().signal,
   );
   assert.equal(result.status, "located");
+  assert.ok(result.evidenceUrl);
+  assert.ok(result.mapEvidenceUrl);
+  assert.equal(result.backgroundReady, true);
   assert.ok(Math.abs(result.latitude - 19.31560502) < 0.0001);
   assert.ok(Math.abs(result.longitude - 99.15525179) < 0.0001);
   console.log(JSON.stringify(result));
