@@ -1,7 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
-import { readRows } from "../server/infrastructure/led-source.mjs";
+import {
+  readRows,
+  createLedSource,
+  advancePage,
+} from "../server/infrastructure/led-source.mjs";
+import { propertyId } from "../server/domain/catalog.mjs";
+test("pagination waits for changed rows without requiring document navigation", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<table><tr><td><form action="asset_open.asp"></form><span>page one</span></td></tr></table><a title="ถัดไป" href="#" onclick="setTimeout(()=>{document.querySelector('span').textContent='page two';this.remove()},100);return false">Next</a>`,
+    );
+    assert.equal(await advancePage(page), true);
+    assert.match(await page.innerText("body"), /page two/);
+    assert.equal(await advancePage(page), false);
+  } finally {
+    await browser.close();
+  }
+});
 test("source adapter excludes Bootstrap and inline red rows, not ordinary rows", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -19,6 +38,81 @@ test("source adapter excludes Bootstrap and inline red rows, not ordinary rows",
       rows.map((r) => r.red),
       [true, true, true, false],
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("unchanged known properties skip detail navigation and screenshots", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const cells = [
+      "ชม7/2569",
+      "1 - 1",
+      "คดี1/2568",
+      "ที่ดิน",
+      "2",
+      "0",
+      "0",
+      "1000000",
+      "สุเทพ",
+      "เมืองเชียงใหม่",
+      "เชียงใหม่",
+    ];
+    await page.setContent(
+      "<p>พบ 1 รายการ</p><table><tr>" +
+        cells
+          .map(
+            (c, i) =>
+              `<td>${i === 0 ? '<form action="asset_open.asp"></form>' : ""}${c}</td>`,
+          )
+          .join("") +
+        "</tr></table>",
+    );
+    const previous = {
+      id: propertyId(cells),
+      rawText: "saved detail",
+      screenshotUrl: "/evidence/fixture.png",
+      sourceRow: cells,
+      status: "located",
+      deed: "123",
+      parcels: [],
+    };
+    const source = createLedSource(
+      {
+        led: page,
+        submit: async () => {},
+        screenshot: async () => {
+          throw Error("must not download images again");
+        },
+      },
+      {
+        findExisting: async (id) => {
+          assert.equal(id, previous.id);
+          return previous;
+        },
+      },
+    );
+    const job = {
+      id: "fixture",
+      values: {},
+      pages: 0,
+      seen: 0,
+      skippedRed: 0,
+      excluded: 0,
+      properties: [],
+      warnings: [],
+    };
+    await source.extract(
+      job,
+      "123456",
+      new AbortController().signal,
+      async () => {},
+    );
+    assert.equal(job.extractionComplete, true);
+    assert.equal(job.skippedExisting, 1);
+    assert.equal(job.properties[0].screenshotUrl, previous.screenshotUrl);
   } finally {
     await browser.close();
   }

@@ -5,7 +5,8 @@ on:
   pull_request:
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    # Match the Linux dependencies supported by the pinned Playwright version.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

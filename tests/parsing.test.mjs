@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   area,
+  propertyArea,
   deeds,
   dates,
   coordinates,
@@ -11,6 +12,13 @@ import {
   validateValues,
   landDocument,
 } from "../server/domain/parsing.mjs";
+test("condominium areas retain square metres and normalize filter area", () => {
+  const c = ["", "", "", "ห้องชุด", "0", "0", "38.04", "", "", "", ""];
+  assert.equal(propertyArea(c).areaSqWa, 9.51);
+  assert.equal(propertyArea(c).areaText, "38.04 ตร.ม. (พื้นที่ห้องชุด)");
+  c[3] = "ที่ดินว่างเปล่า";
+  assert.equal(propertyArea(c).areaSqWa, 38.04);
+});
 test("total area includes ngan and fractional square wah", () => {
   assert.equal(area(["", "", "", "", "4", "1", "5", "", "", "", ""]), 1705);
   assert.equal(area(["", "", "", "", "2", "0", "0.1", "", "", "", ""]), 800.1);

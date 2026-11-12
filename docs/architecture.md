@@ -1,37 +1,27 @@
 # Architecture
 
-The local application follows Clean Architecture boundaries without adding a framework or dependency injection container.
+The local application separates domain rules, application workflow, infrastructure adapters, and HTTP presentation. React uses only the HTTP API.
 
 ```mermaid
 flowchart LR
-  UI[React UI] --> HTTP[HTTP presentation]
-  HTTP --> App[Retrieval application service]
-  App --> Domain[Domain rules]
-  Root[Composition root] --> App
-  Root --> Infra[Playwright and PostgreSQL adapters]
-  Infra --> Domain
+  UI[React explorer and sync settings] --> HTTP[Catalog HTTP]
+  HTTP --> Sync[Sync application service]
+  HTTP --> Repo[PostgreSQL repository]
+  Sync --> Domain[Identity, retention and filter rules]
+  Sync --> Ports[Source / Geocoder / Files / Repository ports]
+  Ports --> Adapters[LED, LandsMaps, filesystem, PostgreSQL]
 ```
 
-`createRetrievalService` receives four ports:
+`createSyncService` receives repository, source, geocoder, files, geography and an injectable clock. It owns the single-job lock, scheduled runs, scope queue, human CAPTCHA wait, cancellation, progress, source errors and retention. Restarted work is marked interrupted; a new run safely upserts records again.
 
-| Port       | Responsibility                                                                                             |
-| ---------- | ---------------------------------------------------------------------------------------------------------- |
-| repository | Persist and load retrieval snapshots.                                                                      |
-| source     | Prepare source filters; extract all result pages and emit progress snapshots.                              |
-| geocoder   | Resolve a deed using province and district, returning coordinates and evidence or a missing-result status. |
-| workspace  | Serialize browser operations and prevent simultaneous jobs from sharing the same source form.              |
+The LED adapter owns form preparation, pagination, red-row exclusion and detail extraction. The sync form has only geographical values; display filters never reach the adapter. A stable identity uses source sale lot, asset sequence, case and province. It deliberately distinguishes a new sale lot from a repeated fetch of the same listing.
 
-The application service manages job lifecycle, cancellation, retry, completion rules, and persistence. It imports only domain validation and standard JavaScript runtime utilities. Infrastructure provides the browser implementation and SQL. The composition root constructs and connects these pieces.
+PostgreSQL stores source JSON separately from user JSON. Upsert never writes user JSON on conflict. A per-run ledger records first/last seen and increments once per sync run, despite multiple progress callbacks. Superseded and expired evidence enters a durable file-GC queue in the same transaction as the data change. Only unreferenced allowlisted files within the evidence directory can be removed; failed deletions remain queued.
 
-The LED adapter owns pagination, red-row detection, table-layout checks, opening details and screenshots. The LandsMaps adapter owns province/district selection, transient notice handling, extraction of visible coordinates and checks against the returned location. The domain module normalizes Thai place names and evaluates area and price boundaries.
+Retention uses the Bangkok calendar date and one calendar month after the latest valid auction date. Unknown/invalid schedules are retained. Manual protection always overrides expiry. Other exceptions come from saved settings.
 
-Snapshots are stored in PostgreSQL JSONB. Each retrieval preserves its exact filters, counters, outcomes, and timestamps. Evidence images remain on local disk. A stopped process marks unfinished jobs as interrupted on startup. A coordinate-only retry cannot promote an incomplete extraction to completed.
+LandsMaps returns coordinates and two evidence views after a bounded tile-loading wait. Facebook provides date-matched full images from visible public posts; it never claims row recognition or changes user auction status. Those adapters surface loading failures separately from genuine missing results.
 
-The service listens on loopback. Write endpoints require an application header and reject foreign browser origins. This is a single-user local tool, not a public multi-tenant service.
+HTTP writes require an application header and a recognized local origin. The composition root listens only on loopback and starts the scheduler. Credentials, retrieved records, evidence and build output stay out of Git. Reference geography is public, versioned data; a local cache can replace it without making the UI dependent on a live source form.
 
-## Change guidance
-
-- Source layout changes: update the relevant infrastructure adapter and its fixture/smoke tests.
-- Business constraints: update domain rules and their unit tests.
-- Workflow changes: update the application service and its tests using injected fake ports.
-- UI/API changes: preserve explicit status and evidence visibility; never substitute guessed coordinates.
+Unit tests cover boundaries and application ports. Database smoke verification checks actual upsert and annotation preservation. Live adapter smoke tests are explicit and excluded from CI.

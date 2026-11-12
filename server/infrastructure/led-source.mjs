@@ -1,16 +1,32 @@
-import { createHash } from "node:crypto";
+import { propertyId, detailIdentity } from "../domain/catalog.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { LED } from "./browser-service.mjs";
 import {
   clean,
   number,
-  area,
+  propertyArea,
   deeds,
   dates,
   meetsCriteria,
   landDocument,
 } from "../domain/parsing.mjs";
 const rowSelector = 'tr:has(form[action*="asset_open"])';
+export async function advancePage(page) {
+  const next = page.locator('a[title="ถัดไป"]').first();
+  if (!(await next.count())) return false;
+  const before = await page.locator(rowSelector).first().innerText();
+  await next.click();
+  // Pagination may update the current document without a navigation event.
+  await page.waitForFunction(
+    ({ selector, before }) => {
+      const row = document.querySelector(selector);
+      return row && row.innerText !== before;
+    },
+    { selector: rowSelector, before },
+    { timeout: 45000 },
+  );
+  return true;
+}
 export async function readRows(page) {
   return page.locator(rowSelector).evaluateAll((rows) =>
     rows.map((r) => {
@@ -35,7 +51,10 @@ export async function readRows(page) {
   );
 }
 
-export function createLedSource(browser) {
+export function createLedSource(
+  browser,
+  { findExisting = async () => null } = {},
+) {
   async function extract(job, captcha, signal, onChange) {
     const saveJob = onChange;
     const progress = async (j, status, message) => {
@@ -66,7 +85,6 @@ export function createLedSource(browser) {
         throw Error("หน้าผลค้นหาวนซ้ำ หยุดโดยเก็บข้อมูลที่ดึงแล้วไว้");
       seenPages.add(fingerprint);
       job.pages++;
-      await browser.screenshot(page, `${job.id}-page-${job.pages}`);
       for (let index = 0; index < rows.length; index++) {
         signal.throwIfAborted();
         const row = rows[index];
@@ -78,10 +96,7 @@ export function createLedSource(browser) {
         if (row.cells.length !== 11)
           throw Error("จำนวนคอลัมน์ต้นทางเปลี่ยน กรุณาตรวจตัวเชื่อมต่อ");
         const c = row.cells.map(clean),
-          id = createHash("sha256")
-            .update(c.join("|") + "|" + job.pages + "|" + index)
-            .digest("hex")
-            .slice(0, 16);
+          id = propertyId(c);
         const p = {
           id,
           title: `${c[3]} · ${c[8]}`,
@@ -89,8 +104,7 @@ export function createLedSource(browser) {
           province: c[10],
           district: c[9],
           subdistrict: c[8],
-          areaSqWa: area(c),
-          areaText: `${c[4]} ไร่ ${c[5]} งาน ${c[6]} ตร.วา`,
+          ...propertyArea(c),
           price: number(c[7]),
           sourceUrl: LED,
           deed: "",
@@ -101,13 +115,31 @@ export function createLedSource(browser) {
           parcels: [],
           retrievedAt: new Date().toISOString(),
           sourceRow: c,
+          ...detailIdentity("", c),
         };
-        if (p.areaSqWa === null || p.price === null)
-          throw Error(
-            "อ่านตัวเลขราคา/พื้นที่จากต้นทางไม่ได้ กรุณาตรวจรูปแบบตาราง",
-          );
         if (!meetsCriteria(p, job.values)) {
           job.excluded++;
+          continue;
+        }
+        const existing = await findExisting(id);
+        if (
+          existing?.rawText &&
+          existing.screenshotUrl &&
+          JSON.stringify(existing.sourceRow) === JSON.stringify(c)
+        ) {
+          const { user, firstSeen, lastSeen, syncCount, ...previous } =
+            existing;
+          job.properties.push({
+            ...previous,
+            ...propertyArea(c),
+            retrievedAt: new Date().toISOString(),
+          });
+          job.skippedExisting = (job.skippedExisting || 0) + 1;
+          await progress(
+            job,
+            "extracting",
+            `หน้า ${job.pages} · ข้ามรายละเอียดเดิม ${p.assetSequence} · ${p.district}`,
+          );
           continue;
         }
         job.properties.push(p);
@@ -128,13 +160,11 @@ export function createLedSource(browser) {
             .waitFor({ timeout: 30000 });
           const raw = await detail.innerText("body");
           p.rawText = raw;
+          Object.assign(p, detailIdentity(raw, c));
           p.landDocument = landDocument(raw);
           p.sourceUrl = detail.url();
           p.sourceTitle = await detail.title();
-          p.screenshotUrl = await browser.screenshot(
-            detail,
-            `${job.id}-${p.id}`,
-          );
+          p.screenshotUrl = await browser.screenshot(detail, `${p.id}-led`);
           p.deed = deeds(raw).join(", ");
           p.auctionDates = dates(raw);
           if (!p.deed || !p.auctionDates.length) {
@@ -154,16 +184,7 @@ export function createLedSource(browser) {
         await delay(800, undefined, { signal });
       }
       await saveJob(job);
-      const next = page.locator('a[title="ถัดไป"]').first();
-      if (!(await next.count())) break;
-      const before = await page.locator(rowSelector).first().innerText();
-      await Promise.all([
-        page.waitForEvent("domcontentloaded", { timeout: 45000 }),
-        next.click(),
-      ]);
-      await page.locator(rowSelector).first().waitFor({ timeout: 30000 });
-      if ((await page.locator(rowSelector).first().innerText()) === before)
-        throw Error("เว็บไม่เปลี่ยนหน้าตามคำขอ กรุณาลองใหม่");
+      if (!(await advancePage(page))) break;
     }
     if (expected !== null && expected !== job.seen)
       job.warnings.push(
@@ -173,5 +194,21 @@ export function createLedSource(browser) {
     return job;
   }
 
-  return { prepare: (values) => browser.apply(values), extract };
+  return {
+    prepare: (values) => browser.apply(values),
+    async prepareScope(scope) {
+      const schema = await browser.schema(true);
+      const values = Object.fromEntries(
+        schema.fields.map((f) => [f.key, f.kind === "select" ? f.value : ""]),
+      );
+      Object.assign(values, {
+        provinces: scope.provinceCode,
+        amphurSelect: scope.districtCode,
+        tambonSelect: "",
+      });
+      await browser.apply(values);
+      return { captchaUrl: "/api/captcha?t=" + Date.now() };
+    },
+    extract,
+  };
 }
