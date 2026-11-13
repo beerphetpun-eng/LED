@@ -8,20 +8,22 @@ type Column = {
   label: string;
   value: (p: Property) => Value;
   display?: (p: Property) => ReactNode;
+  truncate?: boolean;
 };
 const collator = new Intl.Collator("th", { numeric: true });
 const columns: Column[] = [
   { label: "ลำดับ", value: (p) => p.assetSequence },
-  { label: "ประเภททรัพย์", value: (p) => p.propertyType },
+  { label: "ประเภททรัพย์", value: (p) => p.propertyType, truncate: true },
   { label: "จังหวัด", value: (p) => p.province },
   { label: "อำเภอ", value: (p) => p.district },
   { label: "ตำบล", value: (p) => p.subdistrict },
   { label: "เลขคดี", value: (p) => p.caseNumber },
-  { label: "โฉนด", value: (p) => p.deed || null },
+  { label: "โฉนด", value: (p) => p.deed || null, truncate: true },
   {
     label: "เนื้อที่",
     value: (p) => p.areaSqWa,
     display: (p) => p.areaText || "—",
+    truncate: true,
   },
   {
     label: "ราคารวม (บาท)",
@@ -65,7 +67,7 @@ const columns: Column[] = [
     value: (p) =>
       p.parcels.some((v) => v.latitude !== null && v.longitude !== null)
         ? "พบพิกัด"
-        : "รอพิกัด / ตรวจสอบ",
+        : "รอพิกัด",
   },
   {
     label: "สถานะประมูล",
@@ -76,7 +78,7 @@ const columns: Column[] = [
           ? "อยู่ระหว่างประมูล"
           : "ยังไม่ระบุ",
   },
-  { label: "ตรวจราคา", value: (p) => p.pricing.warning },
+  { label: "ตรวจราคา", value: (p) => p.pricing.warning, truncate: true },
 ];
 
 export function PropertyTable({
@@ -113,6 +115,9 @@ export function PropertyTable({
       <table className="property-table" aria-label="รายการทรัพย์">
         <thead>
           <tr>
+            <th className="table-open" scope="col">
+              เปิด
+            </th>
             {columns.map((column, index) => (
               <th
                 key={column.label}
@@ -145,20 +150,12 @@ export function PropertyTable({
                 </button>
               </th>
             ))}
-            <th scope="col">รายละเอียด</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((p) => (
             <tr key={p.id}>
-              {columns.map((column) => (
-                <td key={column.label}>
-                  {column.display
-                    ? column.display(p)
-                    : (column.value(p) ?? "—")}
-                </td>
-              ))}
-              <td>
+              <td className="table-open">
                 <button
                   onClick={() => onSelect(p)}
                   aria-label={`ดูรายละเอียดทรัพย์ ${p.assetSequence} คดี ${p.caseNumber}`}
@@ -166,6 +163,22 @@ export function PropertyTable({
                   เปิด
                 </button>
               </td>
+              {columns.map((column) => {
+                const value = column.display
+                  ? column.display(p)
+                  : (column.value(p) ?? "—");
+                return (
+                  <td key={column.label}>
+                    {column.truncate && typeof value === "string" ? (
+                      <span className="table-text" title={value}>
+                        {value}
+                      </span>
+                    ) : (
+                      value
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
