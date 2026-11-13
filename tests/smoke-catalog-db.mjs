@@ -24,6 +24,19 @@ try {
     auctionStatus: "ended",
     protected: true,
   });
+  await Promise.all([
+    db.updateUser(id, { stars: 2 }),
+    db.updateUser(id, { comment: "comment saved separately" }),
+  ]);
+  assert.deepEqual((await db.getProperty(id)).user, {
+    bookmarked: true,
+    stars: 2,
+    comment: "comment saved separately",
+    auctionStatus: "ended",
+    protected: true,
+  });
+  await assert.rejects(db.updateUser(id, { stars: 6 }));
+  await db.updateUser(id, { stars: 4, comment: "verification" });
   await db.upsertProperty({ ...property, price: 200 }, "second", "engaged");
   await db.upsertProperty({ ...property, price: 300 }, "second", "engaged");
   const result = await db.getProperty(id);

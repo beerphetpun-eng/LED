@@ -113,6 +113,21 @@ export function validateUser(input) {
     throw Error("ดาวต้องเป็น 0–5 และสถานะ/คอมเมนต์ต้องถูกต้อง");
   return Object.fromEntries(Object.keys(emptyUser()).map((k) => [k, u[k]]));
 }
+export function validateUserPatch(input) {
+  const keys = Object.keys(emptyUser());
+  if (
+    !input ||
+    typeof input !== "object" ||
+    Array.isArray(input) ||
+    !Object.keys(input).length ||
+    Object.keys(input).some((key) => !keys.includes(key))
+  )
+    throw Error("ข้อมูลบันทึกส่วนตัวไม่ถูกต้อง");
+  const validated = validateUser(input);
+  return Object.fromEntries(
+    Object.keys(input).map((key) => [key, validated[key]]),
+  );
+}
 export function validateSettings(input, geography) {
   if (
     !input ||

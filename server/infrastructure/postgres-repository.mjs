@@ -6,7 +6,7 @@ import {
   defaultSettings,
   emptyUser,
   shouldExpire,
-  validateUser,
+  validateUserPatch,
   filterProperties,
   missingParcelDeeds,
 } from "../domain/catalog.mjs";
@@ -302,9 +302,9 @@ export async function queryProperties(filters) {
   };
 }
 export async function updateUser(id, data) {
-  const user = validateUser(data);
+  const user = validateUserPatch(data);
   const r = await pool.query(
-    "UPDATE land_radar.properties SET user_data=$2 WHERE id=$1 RETURNING id",
+    "UPDATE land_radar.properties SET user_data=user_data || $2::jsonb WHERE id=$1 RETURNING id",
     [id, JSON.stringify(user)],
   );
   if (!r.rowCount) throw Error("ไม่พบทรัพย์ อาจหมดอายุและถูกลบแล้ว");

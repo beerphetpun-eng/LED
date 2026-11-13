@@ -116,6 +116,7 @@ function App() {
     [loading, setLoading] = useState(true);
   const filtersRef = useRef(filters),
     requestNumber = useRef(0),
+    userWriteVersion = useRef(0),
     selectedId = useRef<string | null>(null);
   filtersRef.current = filters;
   selectedId.current = selected?.id || null;
@@ -167,8 +168,16 @@ function App() {
             await loadLibrary();
             const id = selectedId.current;
             if (id) {
+              const version = userWriteVersion.current;
               const p = await api<Property>("/properties/" + id);
-              if (selectedId.current === id) setSelected(p);
+              if (selectedId.current === id)
+                setSelected((current) =>
+                  current?.id !== id
+                    ? current
+                    : version === userWriteVersion.current
+                      ? p
+                      : { ...p, user: current.user },
+                );
             }
           }
         })
@@ -212,17 +221,15 @@ function App() {
       setSelected(d);
     });
   }
-  async function saveUser(user: UserNotes) {
-    if (!selected) return;
-    await report("กำลังบันทึก", async () => {
-      const p = await api<Property>(
-        "/properties/" + selected.id + "/user",
-        "PATCH",
-        user,
-      );
-      setSelected(p);
-      await loadLibrary();
-    });
+  async function saveUser(id: string, patch: Partial<UserNotes>) {
+    await api<Property>(`/properties/${id}/user`, "PATCH", patch);
+    userWriteVersion.current++;
+    setSelected((current) =>
+      current?.id === id
+        ? { ...current, user: { ...current.user, ...patch } }
+        : current,
+    );
+    void loadLibrary().catch((e) => setError(e.message));
   }
   async function facebook(days: number) {
     if (!selected) return;
@@ -822,7 +829,7 @@ function App() {
           key={selected.id}
           property={selected}
           onClose={() => setSelected(null)}
-          onSave={(u) => saveUser(u)}
+          onSave={(patch) => saveUser(selected.id, patch)}
           onFacebook={(d) => facebook(d)}
           onRefreshPhotos={() => refreshPhotos(selected.id)}
           onImage={setImage}

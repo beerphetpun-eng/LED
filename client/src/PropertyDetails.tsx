@@ -44,7 +44,7 @@ export function PropertyDetails({
 }: {
   property: Property;
   onClose: () => void;
-  onSave: (u: UserNotes) => Promise<void>;
+  onSave: (patch: Partial<UserNotes>) => Promise<void>;
   onFacebook: (days: number) => Promise<void>;
   onRefreshPhotos: () => Promise<{
     checked: number;
@@ -53,20 +53,50 @@ export function PropertyDetails({
   }>;
   onImage: (url: string) => void;
 }) {
-  const [user, setUser] = useState(p.user),
-    [saving, setSaving] = useState(false),
+  const [pendingPreferences, setPendingPreferences] = useState<Partial<
+      Omit<UserNotes, "comment">
+    > | null>(null),
+    [preferenceMessage, setPreferenceMessage] = useState<{
+      text: string;
+      error: boolean;
+    } | null>(null),
+    [commentDraft, setCommentDraft] = useState<string | null>(null),
+    [savingComment, setSavingComment] = useState(false),
+    [commentError, setCommentError] = useState(""),
     [fbBusy, setFbBusy] = useState(false),
     [photoBusy, setPhotoBusy] = useState(false),
     [photoMessage, setPhotoMessage] = useState<{
       text: string;
       warning: boolean;
     } | null>(null),
-    [days, setDays] = useState(7),
-    [dirty, setDirty] = useState(false);
-  const edit = (u: Partial<UserNotes>) => {
-    setUser((s) => ({ ...s, ...u }));
-    setDirty(true);
-  };
+    [days, setDays] = useState(7);
+  const user = { ...p.user, ...pendingPreferences };
+  const comment = commentDraft ?? p.user.comment;
+  async function savePreferences(patch: Partial<Omit<UserNotes, "comment">>) {
+    if (pendingPreferences) return;
+    setPendingPreferences(patch);
+    setPreferenceMessage(null);
+    try {
+      await onSave(patch);
+      setPreferenceMessage({ text: "บันทึกแล้ว", error: false });
+    } catch (e) {
+      setPreferenceMessage({ text: (e as Error).message, error: true });
+    } finally {
+      setPendingPreferences(null);
+    }
+  }
+  async function saveComment() {
+    setSavingComment(true);
+    setCommentError("");
+    try {
+      await onSave({ comment });
+      setCommentDraft((draft) => (draft === comment ? null : draft));
+    } catch (e) {
+      setCommentError((e as Error).message);
+    } finally {
+      setSavingComment(false);
+    }
+  }
   const next = p.auctionDates
     .map(auctionDay)
     .filter((d) => d >= today())
@@ -184,90 +214,107 @@ export function PropertyDetails({
             </dl>
             <section className="personal">
               <h3>บันทึกของคุณ</h3>
-              <button
-                className={user.bookmarked ? "bookmark active" : "bookmark"}
-                aria-pressed={user.bookmarked}
-                onClick={() => edit({ bookmarked: !user.bookmarked })}
+              <fieldset
+                className="property-preferences"
+                aria-label="บันทึกอัตโนมัติ"
+                disabled={!!pendingPreferences}
               >
-                <Bookmark
-                  size={17}
-                  fill={user.bookmarked ? "currentColor" : "none"}
-                />
-                {user.bookmarked ? "บุ๊กมาร์กแล้ว" : "บุ๊กมาร์กทรัพย์"}
-              </button>
-              <div className="stars" aria-label="ให้คะแนนทรัพย์">
                 <button
-                  className={user.stars === 0 ? "chosen" : ""}
-                  aria-label="ให้ 0 ดาว"
-                  onClick={() => edit({ stars: 0 })}
+                  className={user.bookmarked ? "bookmark active" : "bookmark"}
+                  aria-pressed={user.bookmarked}
+                  onClick={() =>
+                    void savePreferences({ bookmarked: !user.bookmarked })
+                  }
                 >
-                  0
+                  <Bookmark
+                    size={17}
+                    fill={user.bookmarked ? "currentColor" : "none"}
+                  />
+                  {user.bookmarked ? "บุ๊กมาร์กแล้ว" : "บุ๊กมาร์กทรัพย์"}
                 </button>
-                {[1, 2, 3, 4, 5].map((n) => (
+                <div className="stars" aria-label="ให้คะแนนทรัพย์">
                   <button
-                    key={n}
-                    aria-label={`ให้ ${n} ดาว`}
-                    aria-pressed={user.stars === n}
-                    onClick={() => edit({ stars: n })}
+                    className={user.stars === 0 ? "chosen" : ""}
+                    aria-label="ให้ 0 ดาว"
+                    aria-pressed={user.stars === 0}
+                    onClick={() => void savePreferences({ stars: 0 })}
                   >
-                    <Star
-                      size={23}
-                      fill={user.stars >= n ? "currentColor" : "none"}
-                    />
+                    0
                   </button>
-                ))}
-                <small>{user.stars}/5</small>
-              </div>
-              <label>
-                สถานะประมูลที่คุณระบุ
-                <select
-                  value={user.auctionStatus}
-                  onChange={(e) => edit({ auctionStatus: e.target.value })}
-                >
-                  <option value="">ยังไม่ระบุ</option>
-                  <option value="auctioning">ยังอยู่ในสถานะประมูล</option>
-                  <option value="ended">จบการประมูลแล้ว</option>
-                </select>
-              </label>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      aria-label={`ให้ ${n} ดาว`}
+                      aria-pressed={user.stars === n}
+                      onClick={() => void savePreferences({ stars: n })}
+                    >
+                      <Star
+                        size={23}
+                        fill={user.stars >= n ? "currentColor" : "none"}
+                      />
+                    </button>
+                  ))}
+                  <small>{user.stars}/5</small>
+                </div>
+                <label>
+                  สถานะประมูลที่คุณระบุ
+                  <select
+                    value={user.auctionStatus}
+                    onChange={(e) =>
+                      void savePreferences({ auctionStatus: e.target.value })
+                    }
+                  >
+                    <option value="">ยังไม่ระบุ</option>
+                    <option value="auctioning">ยังอยู่ในสถานะประมูล</option>
+                    <option value="ended">จบการประมูลแล้ว</option>
+                  </select>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={user.protected}
+                    onChange={(e) =>
+                      void savePreferences({ protected: e.target.checked })
+                    }
+                  />
+                  ห้ามลบอัตโนมัติ
+                </label>
+              </fieldset>
+              <small
+                role="status"
+                className={preferenceMessage?.error ? "inline-error" : "muted"}
+              >
+                {pendingPreferences
+                  ? "กำลังบันทึก…"
+                  : preferenceMessage?.text || "บันทึกอัตโนมัติเมื่อเปลี่ยน"}
+              </small>
+            </section>
+            <section className="property-comment" aria-label="คอมเมนต์">
               <label>
                 คอมเมนต์
                 <textarea
-                  value={user.comment}
+                  value={comment}
                   maxLength={10000}
                   rows={3}
                   placeholder="จดรายละเอียดที่สนใจ…"
-                  onChange={(e) => edit({ comment: e.target.value })}
+                  onChange={(e) => {
+                    setCommentDraft(e.target.value);
+                    setCommentError("");
+                  }}
                 />
               </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={user.protected}
-                  onChange={(e) => edit({ protected: e.target.checked })}
-                />
-                ห้ามลบอัตโนมัติ
-              </label>
+              {commentError && (
+                <small role="alert" className="inline-error">
+                  {commentError}
+                </small>
+              )}
               <button
                 className="primary"
-                disabled={!dirty || saving}
-                onClick={async () => {
-                  setSaving(true);
-                  try {
-                    await onSave(user);
-                    setDirty(false);
-                  } catch {
-                    // The notification menu reports the failure; keep the draft.
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
+                disabled={comment === p.user.comment || savingComment}
+                onClick={() => void saveComment()}
               >
                 <Save size={15} />
-                {saving
-                  ? "กำลังบันทึก"
-                  : dirty
-                    ? "บันทึกการเปลี่ยนแปลง"
-                    : "บันทึกแล้ว"}
+                {savingComment ? "กำลังบันทึก…" : "บันทึกคอมเมนต์"}
               </button>
             </section>
           </section>

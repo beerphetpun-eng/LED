@@ -962,6 +962,27 @@ footer {
 .personal h3 {
   margin: 0;
 }
+.property-preferences,
+.property-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+}
+.property-preferences {
+  padding: 0;
+  border: 0;
+}
+.property-comment {
+  padding: 12px;
+  border: 1px solid #e4e9dc;
+  border-radius: 8px;
+  background: #f7f9f3;
+}
+.property-comment button {
+  align-self: start;
+}
 .bookmark {
   align-self: start;
 }
