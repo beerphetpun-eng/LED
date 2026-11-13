@@ -1,7 +1,36 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { LANDS } from "./browser-service.mjs";
 import { clean, district, coordinates } from "../domain/parsing.mjs";
-import { SourceUnavailableError } from "../domain/errors.mjs";
+import {
+  SourceUnavailableError,
+  checkLandsSearchResponse,
+} from "../domain/errors.mjs";
+export async function waitForDistrict(
+  page,
+  name,
+  signal,
+  { timeout = 30000, provinceCode } = {},
+) {
+  const deadline = Date.now() + timeout;
+  let nextSelection = 0;
+  do {
+    signal.throwIfAborted();
+    if (provinceCode && Date.now() >= nextSelection) {
+      await page.locator("#cbprovince").selectOption(provinceCode);
+      nextSelection = Date.now() + 5000;
+    }
+    const matches = await page
+      .locator("#cbamphur")
+      .evaluate((e) =>
+        Array.from(e.options).map((o) => ({ value: o.value, label: o.text })),
+      );
+    const found = matches.filter((o) => district(o.label) === district(name));
+    if (found.length === 1) return found[0];
+    if (found.length > 1) break;
+    await delay(250, undefined, { signal });
+  } while (Date.now() < deadline);
+  throw Error("ชื่ออำเภอไม่ตรงกับ LandsMaps หรือรายการอำเภอยังโหลดไม่สำเร็จ");
+}
 export function createLandsMapsGeocoder(browser) {
   async function waitForBackground(page, signal) {
     let loaded = true;
@@ -57,19 +86,33 @@ export function createLandsMapsGeocoder(browser) {
         (x) => clean(x.label) === clean(record.province),
       );
     if (!province) throw Error("ไม่พบจังหวัดใน LandsMaps");
-    await page.locator("#cbprovince").selectOption(province.value);
-    await page
-      .locator("#cbamphur option")
-      .nth(1)
-      .waitFor({ state: "attached" });
-    const districts = (await options(page, "#cbamphur")).filter(
-      (x) => district(x.label) === district(record.district),
+    const selectedDistrict = await waitForDistrict(
+      page,
+      record.district,
+      signal,
+      { provinceCode: province.value },
     );
-    if (districts.length !== 1)
-      throw Error("ชื่ออำเภอไม่ตรงกับ LandsMaps ต้องตรวจสอบชื่อเดิม/ชื่อใหม่");
-    await page.locator("#cbamphur").selectOption(districts[0].value);
+    await page.locator("#cbamphur").selectOption(selectedDistrict.value);
     await page.locator("#faketxtparcelno").fill(deed);
-    await page.locator("#btnSearch").click();
+    // Observe the response to the normal UI search. The source sometimes renders
+    // a generic "not found" dialog for a daily quota error returned with HTTP 200.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname.includes("/LandsMaps/GetParcelByParcelNo/"),
+        { timeout: 45000 },
+      ),
+      page.locator("#btnSearch").click(),
+    ]);
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new SourceUnavailableError(
+        "LandsMaps ส่งผลค้นหาในรูปแบบที่อ่านไม่ได้",
+      );
+    }
+    checkLandsSearchResponse(payload, response.status());
     for (let attempt = 0; attempt < 45; attempt++) {
       signal.throwIfAborted();
       const acknowledge = page.getByRole("button", {

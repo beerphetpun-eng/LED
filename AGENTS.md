@@ -13,6 +13,7 @@
 - Create a feature branch, commit and push completed work, and merge when appropriate and verified. Use Conventional Commits. Never force-push or discard unrelated changes.
 - On 2026-11-13 the user requested continuing until the work is complete; if a usage limit interrupts work, wait 5 hours 2 minutes before retrying, then resume from the saved state. Honor this when the session can execute; do not promise autonomous resumption if the platform has stopped the session.
 - A standing Codex thread heartbeat named “ทำงาน Land Radar ต่อ” (automation ID `land-radar`) was created on 2026-11-13 to resume authorized unfinished work every 302 minutes. It must not duplicate active work or invent new work when finished; after a recorded usage limit, respect a minimum 302-minute cooldown. Scheduling does not override platform limits.
+- Live LandsMaps discovery on 2026-11-13: its normal public search returned HTTP 200 with `error: true` and a message limiting searches to 20/day; the page misleadingly displayed “ไม่พบข้อมูล”. Inspect the response to the normal UI search for quota errors, preserve the parcel queue, and retry after 302 minutes without evading the limit. Honor persisted `geoRetryAt` and `lastQuotaAt`; do not perform extra live searches during cooldown. Reuse verified evidence for the exact same province, district, subdistrict and deed.
 
 ## Architecture
 

@@ -1,13 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSyncService } from "../server/application/sync-service.mjs";
+import { SourceRateLimitError } from "../server/domain/errors.mjs";
 const settings = {
   enabled: true,
   intervalHours: 168,
   retention: "manual",
   scopes: [{ provinceCode: "50", districtCodes: ["5001", "5002"] }],
 };
-function setup(fail = false, hang = false, geocoder = {}) {
+function setup(
+  fail = false,
+  hang = false,
+  geocoder = {},
+  clock = () => new Date("2026-11-12T12:00:00Z"),
+) {
   let saved = structuredClone(settings);
   const states = {},
     records = new Map(),
@@ -62,12 +68,12 @@ function setup(fail = false, hang = false, geocoder = {}) {
       await save(j);
     },
   };
-  const service = createSyncService({
+  const options = {
     repository,
     source,
     geocoder,
     files: {},
-    clock: () => new Date("2026-11-12T12:00:00Z"),
+    clock,
     geography: {
       provinces: [
         {
@@ -80,11 +86,14 @@ function setup(fail = false, hang = false, geocoder = {}) {
         },
       ],
     },
-  });
+  };
+  const service = createSyncService(options);
   return {
     service,
     records,
     messages,
+    states,
+    options,
     get extracts() {
       return extracts;
     },
@@ -114,6 +123,99 @@ test("scheduler processes all scopes without waiting for user input", async () =
   await t.service.tick();
   assert.equal(t.extracts, 2);
   assert.equal(t.service.running, false);
+});
+test("daily quota pauses the parcel queue for 302 minutes and resumes after restart without duplicating source retrieval", async () => {
+  let now = new Date("2026-11-12T12:00:00Z"),
+    limited = true,
+    calls = 0;
+  const t = setup(
+    false,
+    false,
+    {
+      locate: async (p, deed) => {
+        calls++;
+        if (limited) throw new SourceRateLimitError("เกินจำกัด 20 /วัน");
+        return {
+          deed,
+          status: "located",
+          mapEvidenceUrl: "/evidence/map.png",
+          backgroundReady: true,
+        };
+      },
+    },
+    () => now,
+  );
+  t.states.sync_runtime = {
+    status: "completed",
+    nextRunAt: "2026-11-19T12:00:00.000Z",
+  };
+  t.records.set("a", { id: "a", deed: "1", parcels: [], status: "pending" });
+  t.records.set("b", { id: "b", deed: "2", parcels: [], status: "pending" });
+  await t.service.init();
+  await t.service.start(true);
+  await t.service.task;
+  assert.equal(calls, 1);
+  assert.equal(t.service.status().status, "waiting_limit");
+  assert.equal(t.service.status().geoRetryAt, "2026-11-12T17:02:00.000Z");
+  assert.equal(t.records.get("a").parcels.length, 0);
+  await assert.rejects(t.service.start(true), /รอโควตา/);
+  await t.service.tick();
+  assert.equal(calls, 1);
+  const restarted = createSyncService(t.options);
+  await restarted.init();
+  assert.equal(restarted.status().status, "waiting_limit");
+  now = new Date("2026-11-12T17:02:00Z");
+  limited = false;
+  await restarted.tick();
+  await restarted.task;
+  assert.equal(calls, 3);
+  assert.equal(t.extracts, 0);
+  assert.equal(restarted.status().geoRetryAt, null);
+  assert.equal(restarted.status().status, "completed");
+  assert.equal(restarted.status().nextRunAt, "2026-11-19T12:00:00.000Z");
+});
+test("verified exact parcels are reused across listings without spending another source query", async () => {
+  let calls = 0;
+  const t = setup(false, false, {
+    locate: async () => {
+      calls++;
+      throw Error("must reuse evidence");
+    },
+  });
+  const geography = {
+    province: "เชียงใหม่",
+    district: "เมืองเชียงใหม่",
+    subdistrict: "สุเทพ",
+  };
+  t.records.set("known", {
+    id: "known",
+    ...geography,
+    deed: "1",
+    status: "located",
+    parcels: [
+      {
+        deed: "1",
+        status: "located",
+        mapEvidenceUrl: "/evidence/map.png",
+        backgroundReady: true,
+      },
+    ],
+  });
+  t.records.set("new", {
+    id: "new",
+    ...geography,
+    deed: "1",
+    status: "pending",
+    parcels: [],
+  });
+  await t.service.start(true);
+  await t.service.task;
+  assert.equal(calls, 0);
+  assert.equal(t.records.get("new").status, "located");
+  assert.equal(
+    t.records.get("new").parcels[0].mapEvidenceUrl,
+    "/evidence/map.png",
+  );
 });
 test("cancellation releases an automatic sync and prevents overlapping runs", async () => {
   const t = setup(false, true);

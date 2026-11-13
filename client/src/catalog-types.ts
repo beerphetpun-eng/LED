@@ -79,6 +79,7 @@ export type Runtime = {
   skippedRed?: number;
   skippedExisting?: number;
   nextRunAt?: string;
+  geoRetryAt?: string | null;
   scopeIndex?: number;
   scopeCount?: number;
   geoDone?: number;

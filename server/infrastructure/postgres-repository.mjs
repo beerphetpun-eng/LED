@@ -74,7 +74,7 @@ export async function alert(message) {
 export async function alerts() {
   return (
     await pool.query(
-      'SELECT id::text,message,created_at AS "createdAt" FROM land_radar.alerts WHERE resolved=false ORDER BY id DESC LIMIT 100',
+      'SELECT id::text,message,created_at AS "createdAt" FROM land_radar.alerts WHERE resolved=false ORDER BY land_radar.alerts.id DESC',
     )
   ).rows;
 }

@@ -330,9 +330,19 @@ function App() {
           <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
           <small>
             {sync?.runtime.running
-              ? `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
+              ? sync.runtime.status === "geocoding"
+                ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
+                : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
               : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
           </small>
+          {sync?.runtime.geoRetryAt && (
+            <small>
+              {sync.settings.enabled
+                ? "ค้นพิกัดต่ออัตโนมัติ"
+                : "ครบเวลารอโควตา"}{" "}
+              {time(sync.runtime.geoRetryAt)}
+            </small>
+          )}
         </div>
         <div className="sync-actions">
           {sync?.runtime.running ? (
@@ -361,7 +371,14 @@ function App() {
                 ซิงค์ด้วยตนเอง
               </button>
               <button
-                disabled={!!busy || !library.total}
+                disabled={
+                  !!busy ||
+                  !library.total ||
+                  !!(
+                    sync?.runtime.geoRetryAt &&
+                    Date.parse(sync.runtime.geoRetryAt) > Date.now()
+                  )
+                }
                 onClick={() =>
                   act("ค้นพิกัด", async () => {
                     await api("/sync/geocode", "POST");

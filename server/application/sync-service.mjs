@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { validateSettings, missingParcelDeeds } from "../domain/catalog.mjs";
-import { SourceUnavailableError } from "../domain/errors.mjs";
+import {
+  SourceUnavailableError,
+  SourceRateLimitError,
+} from "../domain/errors.mjs";
 
 export function createSyncService({
   repository: db,
@@ -52,7 +55,25 @@ export function createSyncService({
     });
   }
   async function lookup(signal) {
-    const records = (await db.allProperties()).filter(
+    const all = await db.allProperties();
+    const cache = new Map();
+    const cacheKey = (p, deed) =>
+      JSON.stringify([p.province, p.district, p.subdistrict, deed]);
+    for (const p of all)
+      for (const parcel of p.parcels || []) {
+        if (
+          parcel.status === "located" &&
+          parcel.mapEvidenceUrl &&
+          parcel.backgroundReady !== false
+        ) {
+          const c =
+            p.assetComponents?.find((c) =>
+              c.deed?.split(", ").includes(parcel.deed),
+            ) || p;
+          cache.set(cacheKey(c, parcel.deed), parcel);
+        }
+      }
+    const records = all.filter(
       (p) =>
         p.deed && p.status !== "failed" && missingParcelDeeds(p).length > 0,
     );
@@ -78,12 +99,17 @@ export function createSyncService({
           const component = p.assetComponents?.find((c) =>
             c.deed?.split(", ").includes(deed),
           );
-          const parcel = await geocoder.locate(
-            component ? { ...component, id: p.id } : p,
-            deed,
-            "catalog",
-            signal,
-          );
+          const record = component ? { ...component, id: p.id } : p;
+          const key = cacheKey(record, deed);
+          const parcel =
+            cache.get(key) ||
+            (await geocoder.locate(record, deed, "catalog", signal));
+          if (
+            parcel.status === "located" &&
+            parcel.mapEvidenceUrl &&
+            parcel.backgroundReady !== false
+          )
+            cache.set(key, parcel);
           parcels.push(parcel);
           if (
             parcel.status !== "located" ||
@@ -95,10 +121,10 @@ export function createSyncService({
             );
         } catch (e) {
           signal.throwIfAborted();
+          if (e instanceof SourceUnavailableError) throw e;
           await db.alert(
             `LandsMaps · โฉนด ${deed}: ${e.message.split("\n")[0]}`,
           );
-          if (e instanceof SourceUnavailableError) throw e;
           parcels.push({
             deed,
             status: "lookup_failed",
@@ -164,9 +190,21 @@ export function createSyncService({
         if (!job.extractionComplete)
           throw Error(job.warnings.join(" · ") || "ต้นทางส่งรายการไม่ครบ");
       }
+      if (
+        state.geoRetryAt &&
+        Date.parse(state.geoRetryAt) > clock().getTime()
+      ) {
+        await persist({
+          status: "waiting_limit",
+          message: "เก็บประกาศแล้ว · รอโควตา LandsMaps เพื่อค้นพิกัดที่เหลือ",
+          finishedAt: clock().toISOString(),
+        });
+        return;
+      }
       await lookup(signal);
       await persist({
         status: "completed",
+        geoRetryAt: null,
         message: geoOnly
           ? "จบการค้นพิกัด รายการที่ไม่พบดูได้จากแจ้งเตือน"
           : "ซิงค์ครบขอบเขตที่เลือกแล้ว",
@@ -175,9 +213,20 @@ export function createSyncService({
       });
     } catch (e) {
       const cancelled = signal.aborted;
+      const limited = e instanceof SourceRateLimitError;
       if (!cancelled) await db.alert(e.message.split("\n")[0]);
       await persist({
-        status: cancelled ? "cancelled" : "partial",
+        status: cancelled ? "cancelled" : limited ? "waiting_limit" : "partial",
+        ...(limited ? { lastQuotaAt: clock().toISOString() } : {}),
+        ...(cancelled
+          ? { geoRetryAt: null }
+          : limited || state.geoRetryAt
+            ? {
+                geoRetryAt: new Date(
+                  clock().getTime() + (e.retryAfterMs || 302 * 60000),
+                ).toISOString(),
+              }
+            : {}),
         message: cancelled
           ? "หยุดซิงค์แล้ว ข้อมูลที่บันทึกยังอยู่"
           : e.message.split("\n")[0],
@@ -211,9 +260,14 @@ export function createSyncService({
       await db.saveSettings(await db.getSettings());
       state = await db.getState("sync_runtime", state);
       if (
-        !["idle", "completed", "partial", "cancelled", "interrupted"].includes(
-          state.status,
-        )
+        ![
+          "idle",
+          "completed",
+          "partial",
+          "cancelled",
+          "interrupted",
+          "waiting_limit",
+        ].includes(state.status)
       ) {
         await persist({
           status: "interrupted",
@@ -232,6 +286,14 @@ export function createSyncService({
     },
     async start(geoOnly = false) {
       if (running) throw Error("มีงานซิงค์กำลังทำงานอยู่");
+      if (
+        geoOnly &&
+        state.geoRetryAt &&
+        Date.parse(state.geoRetryAt) > clock().getTime()
+      )
+        throw Error(
+          "LandsMaps ยังอยู่ในช่วงรอโควตา ระบบจะค้นพิกัดต่ออัตโนมัติตามเวลาที่แสดง",
+        );
       running = true;
       controller = new AbortController();
       try {
@@ -294,6 +356,12 @@ export function createSyncService({
         if (running) return;
         const s = await db.getSettings();
         if (
+          s.enabled &&
+          state.geoRetryAt &&
+          Date.parse(state.geoRetryAt) <= clock().getTime()
+        )
+          await service.start(true);
+        else if (
           s.enabled &&
           (!state.nextRunAt || Date.parse(state.nextRunAt) <= clock().getTime())
         )
