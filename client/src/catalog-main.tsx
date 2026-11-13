@@ -43,10 +43,12 @@ function ViewMap({
   items,
   full,
   selected,
+  focusSelected,
 }: {
   items: Property[];
   full: boolean;
   selected: Property | null;
+  focusSelected: boolean;
 }) {
   const map = useMap();
   const coordinates = items.flatMap((p) =>
@@ -69,11 +71,12 @@ function ViewMap({
       });
   }, [key, full]);
   useEffect(() => {
+    if (!focusSelected) return;
     const p = selected?.parcels.find(
       (v) => v.latitude !== null && v.longitude !== null,
     );
     if (p) map.flyTo([p.latitude!, p.longitude!], 16);
-  }, [selected?.id]);
+  }, [selected?.id, focusSelected]);
   return null;
 }
 function App() {
@@ -89,6 +92,7 @@ function App() {
     [listMode, setListMode] = useState<"cards" | "table">("cards"),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
+    [focusSelected, setFocusSelected] = useState(false),
     [filters, setFilters] = useState<Filters>(() => {
       try {
         return JSON.parse(
@@ -189,9 +193,10 @@ function App() {
       ...(key === "province" ? { district: "" } : {}),
     }));
   }
-  async function select(p: Property) {
+  async function select(p: Property, focusMap = true) {
     await report("กำลังอ่านรายละเอียด", async () => {
       const d = await api<Property>("/properties/" + p.id);
+      setFocusSelected(focusMap);
       setSelected(d);
     });
   }
@@ -588,6 +593,7 @@ function App() {
                   items={library.items}
                   full={full}
                   selected={selected}
+                  focusSelected={focusSelected}
                 />
                 {pins.map(({ p, v }) => (
                   <Marker
@@ -601,16 +607,18 @@ function App() {
                     })}
                     eventHandlers={{
                       click: () => {
-                        void select(p).catch(() => {});
+                        void select(p, false).catch(() => {});
                       },
                     }}
                   >
-                    <Popup>
+                    <Popup autoPan={false}>
                       <b>{p.propertyType}</b>
                       <p>
                         ลำดับ {p.assetSequence} · คดี {p.caseNumber}
                       </p>
-                      <button onClick={() => void select(p).catch(() => {})}>
+                      <button
+                        onClick={() => void select(p, false).catch(() => {})}
+                      >
                         ดูรายละเอียดและภาพ
                       </button>
                     </Popup>
