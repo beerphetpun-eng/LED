@@ -8,7 +8,8 @@ import {
   openDetail,
 } from "../server/infrastructure/led-source.mjs";
 import { propertyId } from "../server/domain/catalog.mjs";
-test("incomplete evidence reopens the announcement once and saves the recovered capture", async () => {
+import { evidenceVersion } from "../server/infrastructure/evidence-images.mjs";
+test("incomplete evidence reopens the announcement once and keeps the best capture", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext();
@@ -38,24 +39,22 @@ test("incomplete evidence reopens the announcement once and saves the recovered 
       `<p>พบ 1 รายการ</p><table><tr>${cells.map((c, i) => `<td>${i === 0 ? '<form action="http://fixture.test/asset_open.asp" method="post" target="_blank"></form>' : ""}${c}</td>`).join("")}</tr></table>`,
     );
     const captures = [];
-    const source = createLedSource(
-      {
-        led: page,
-        verificationCode: async () => "123456",
-        submit: async () => {},
-        screenshot: async (detail) => {
-          captures.push(await detail.innerText("body"));
-          return "/evidence/recovered.png";
-        },
+    const adapter = {
+      led: page,
+      verificationCode: async () => "123456",
+      submit: async () => {},
+      screenshot: async (detail) => {
+        captures.push(await detail.innerText("body"));
+        return "/evidence/recovered.png";
       },
-      {
-        checkImages: async () => ({
-          ready: opens === 2,
-          total: 1,
-          loaded: opens - 1,
-        }),
-      },
-    );
+    };
+    const source = createLedSource(adapter, {
+      checkImages: async () => ({
+        ready: opens === 2,
+        total: 1,
+        loaded: opens - 1,
+      }),
+    });
     const job = {
       id: "fixture",
       values: {},
@@ -73,6 +72,24 @@ test("incomplete evidence reopens the announcement once and saves the recovered 
     assert.equal(job.properties[0].evidenceReady, true);
     assert.equal(captures.length, 1);
     assert.match(captures[0], /capture 2/);
+    assert.equal(context.pages().length, 1);
+
+    const retry = createLedSource(adapter, {
+      checkImages: async () => ({
+        ready: false,
+        total: 3,
+        loaded: opens === 3 ? 2 : 1,
+        photos: { total: 2, loaded: opens === 3 ? 1 : 0 },
+      }),
+    });
+    await retry.extract(
+      { ...job, pages: 0, seen: 0, properties: [] },
+      new AbortController().signal,
+      async () => {},
+    );
+    assert.equal(opens, 4);
+    assert.equal(captures.length, 2);
+    assert.match(captures[1], /capture 3/);
     assert.equal(context.pages().length, 1);
   } finally {
     await browser.close();
@@ -238,7 +255,7 @@ test("unchanged known properties skip detail navigation and screenshots", async 
       rawText: "saved detail",
       screenshotUrl: "/evidence/fixture.png",
       evidenceReady: true,
-      evidenceVersion: 2,
+      evidenceVersion,
       sourceRow: cells,
       status: "located",
       deed: "123",

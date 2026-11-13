@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Star } from "lucide-react";
 import { auctionDay, money } from "./catalog-api";
 import type { Property } from "./catalog-types";
 
@@ -6,7 +7,7 @@ type Value = string | number | null;
 type Column = {
   label: string;
   value: (p: Property) => Value;
-  display?: (p: Property) => string;
+  display?: (p: Property) => ReactNode;
 };
 const collator = new Intl.Collator("th", { numeric: true });
 const columns: Column[] = [
@@ -37,7 +38,23 @@ const columns: Column[] = [
     value: (p) => auctionDay(p.auctionDates[0] || "") || null,
     display: (p) => p.auctionDates[0] || "—",
   },
-  { label: "ดาว", value: (p) => p.user.stars },
+  {
+    label: "ดาว",
+    value: (p) => p.user.stars,
+    display: (p) => (
+      <span className="table-stars">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Star
+            key={n}
+            size={13}
+            aria-hidden="true"
+            fill={n <= p.user.stars ? "currentColor" : "none"}
+          />
+        ))}
+        <span>{p.user.stars}/5</span>
+      </span>
+    ),
+  },
   {
     label: "บุ๊กมาร์ก",
     value: (p) => Number(p.user.bookmarked),

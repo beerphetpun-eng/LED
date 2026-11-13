@@ -9,6 +9,30 @@ import {
 } from "lucide-react";
 import type { Property, UserNotes } from "./catalog-types";
 import { money, time, today, auctionDay } from "./catalog-api";
+
+function EvidenceStatus({ property }: { property: Property }) {
+  const images = property.evidenceImages;
+  if (!images?.photos)
+    return (
+      <small
+        className={property.evidenceReady === false ? "inline-error" : "muted"}
+      >
+        {property.evidenceReady === false
+          ? "ภาพประกาศโหลดไม่ครบ รอเก็บใหม่ในรอบซิงค์"
+          : "ภาพเดิม · รอตรวจรูปถ่ายทรัพย์ในรอบซิงค์"}
+      </small>
+    );
+  const { loaded, total } = images.photos;
+  return (
+    <small className={property.evidenceReady ? "muted" : "inline-error"}>
+      {total === 0
+        ? "ไม่พบรูปถ่ายทรัพย์ในหน้าต้นทาง"
+        : `รูปถ่ายทรัพย์ที่โหลดได้ ${loaded}/${total} รูป`}
+      {images.previousCaptureKept && " · แสดงภาพประกาศที่เก็บไว้ก่อนหน้า"}
+      {!property.evidenceReady && " · ระบบจะตรวจใหม่ในรอบซิงค์"}
+    </small>
+  );
+}
 export function PropertyDetails({
   property: p,
   onClose,
@@ -241,12 +265,8 @@ export function PropertyDetails({
           </button>
         )}
         {p.screenshotUrl && (
-          <p className="small muted">
-            {p.evidenceReady
-              ? `ตรวจรูปในหน้าประกาศก่อนแคปแล้ว ${p.evidenceImages?.loaded ?? ""}/${p.evidenceImages?.total ?? ""} รูป`
-              : p.evidenceReady === false
-                ? "ภาพประกาศยังโหลดไม่ครบ รอเก็บใหม่ในการซิงค์ถัดไป"
-                : "ภาพเดิม รอตรวจสอบและเก็บใหม่ในการซิงค์ถัดไป"}
+          <p className="small">
+            <EvidenceStatus property={p.assetComponents?.[0] || p} />
           </p>
         )}
         {(p.assetComponents?.length || 0) > 1 && (
@@ -269,6 +289,7 @@ export function PropertyDetails({
                   />
                   <span>
                     เลขที่ {c.address || "ไม่ระบุ"} · {c.areaText}
+                    <EvidenceStatus property={c} />
                   </span>
                 </button>
               ))}

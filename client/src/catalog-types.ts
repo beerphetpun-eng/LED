@@ -63,7 +63,13 @@ export type Property = {
   auctionDates: string[];
   screenshotUrl: string;
   evidenceReady?: boolean;
-  evidenceImages?: { total: number; loaded: number; checkedAt: string };
+  evidenceImages?: {
+    total: number;
+    loaded: number;
+    checkedAt: string;
+    photos?: { total: number; loaded: number };
+    previousCaptureKept?: boolean;
+  };
   parcels: Parcel[];
   status: string;
   error?: string;
