@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { validateSettings } from "../domain/catalog.mjs";
+import { validateSettings, missingParcelDeeds } from "../domain/catalog.mjs";
 import { SourceUnavailableError } from "../domain/errors.mjs";
 
 export function createSyncService({
@@ -54,15 +54,7 @@ export function createSyncService({
   async function lookup(signal) {
     const records = (await db.allProperties()).filter(
       (p) =>
-        p.deed &&
-        p.status !== "failed" &&
-        (!p.parcels?.length ||
-          p.parcels.some(
-            (v) =>
-              v.status !== "located" ||
-              !v.mapEvidenceUrl ||
-              v.backgroundReady === false,
-          )),
+        p.deed && p.status !== "failed" && missingParcelDeeds(p).length > 0,
     );
     for (let index = 0; index < records.length; index++) {
       signal.throwIfAborted();

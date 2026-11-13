@@ -7,7 +7,7 @@ const settings = {
   retention: "manual",
   scopes: [{ provinceCode: "50", districtCodes: ["5001", "5002"] }],
 };
-function setup(fail = false, hang = false) {
+function setup(fail = false, hang = false, geocoder = {}) {
   let saved = structuredClone(settings);
   const states = {},
     records = new Map(),
@@ -33,7 +33,8 @@ function setup(fail = false, hang = false) {
     completeFile: async () => {},
     allProperties: async () => [...records.values()],
     upsertProperty: async (p, run) => records.set(p.id, p),
-    updateSource: async () => {},
+    updateSource: async (id, patch) =>
+      records.set(id, { ...records.get(id), ...patch }),
   };
   const source = {
     prepareScope: async () => ({}),
@@ -64,7 +65,7 @@ function setup(fail = false, hang = false) {
   const service = createSyncService({
     repository,
     source,
-    geocoder: {},
+    geocoder,
     files: {},
     clock: () => new Date("2026-11-12T12:00:00Z"),
     geography: {
@@ -129,4 +130,38 @@ test("source errors persist an alert and incomplete status", async () => {
   await t.service.task;
   assert.equal(t.service.status().status, "partial");
   assert.deepEqual(t.messages, ["source changed"]);
+});
+test("new deeds in an existing bundle are geocoded without repeating complete parcels", async () => {
+  const seen = [];
+  const t = setup(false, false, {
+    locate: async (record, deed) => {
+      seen.push([record.subdistrict, deed]);
+      return {
+        deed,
+        status: "located",
+        mapEvidenceUrl: "/evidence/new-map.png",
+        backgroundReady: true,
+      };
+    },
+  });
+  t.records.set("bundle", {
+    id: "bundle",
+    deed: "1, 2",
+    status: "pending",
+    subdistrict: "first",
+    assetComponents: [{ deed: "2", subdistrict: "second" }],
+    parcels: [
+      {
+        deed: "1",
+        status: "located",
+        mapEvidenceUrl: "/evidence/old-map.png",
+        backgroundReady: true,
+      },
+    ],
+  });
+  await t.service.start(true);
+  await t.service.task;
+  assert.deepEqual(seen, [["second", "2"]]);
+  assert.equal(t.records.get("bundle").parcels.length, 2);
+  assert.equal(t.records.get("bundle").status, "located");
 });

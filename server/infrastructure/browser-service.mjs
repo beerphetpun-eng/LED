@@ -15,6 +15,7 @@ export class BrowserService {
   lands = null;
   refreshedAt = null;
   lastDialog = null;
+  pageErrors = [];
   async exclusive(fn) {
     if (this.busy || this.lock)
       throw Error("มีงานกำลังทำงานอยู่ กรุณารอสักครู่");
@@ -35,6 +36,10 @@ export class BrowserService {
       });
       this.led = await context.newPage();
       this.led.setDefaultTimeout(20000);
+      this.led.on("pageerror", (error) => {
+        this.pageErrors.push(error.message);
+        this.pageErrors = this.pageErrors.slice(-10);
+      });
       this.led.on("dialog", async (d) => {
         this.lastDialog = d.message();
         await d.dismiss();
@@ -235,6 +240,11 @@ export class BrowserService {
       path.join(root, "data", name + ".json"),
       JSON.stringify({
         url: page.url(),
+        pageErrors: this.pageErrors,
+        pages: page
+          .context()
+          .pages()
+          .map((p) => p.url()),
         error: error?.stack || String(error || ""),
         rows: await page
           .locator(
@@ -245,6 +255,10 @@ export class BrowserService {
           ),
       }),
     );
+    await page.screenshot({
+      path: path.join(root, "data", name + ".png"),
+      fullPage: false,
+    });
   }
   async close() {
     await this.browser?.close();

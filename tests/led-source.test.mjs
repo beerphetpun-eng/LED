@@ -5,8 +5,46 @@ import {
   readRows,
   createLedSource,
   advancePage,
+  openDetail,
 } from "../server/infrastructure/led-source.mjs";
 import { propertyId } from "../server/domain/catalog.mjs";
+test("asset and pagination forms work without legacy inline click handlers", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    const submitted = [];
+    await context.route("http://fixture.test/**", (route) => {
+      submitted.push({
+        url: route.request().url(),
+        method: route.request().method(),
+        body: route.request().postData(),
+      });
+      return route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body: route.request().url().includes("asset_open")
+          ? "asset details"
+          : `<p>หน้าที่ 2/2</p><table><tr><td><form action="asset_open.asp"></form>same</td>${"<td>value</td>".repeat(10)}</tr></table>`,
+      });
+    });
+    const page = await context.newPage();
+    await page.setContent(
+      `<meta http-equiv="Content-Security-Policy" content="script-src 'none'"><p>หน้าที่ 1/2</p><table><tr onclick="throw Error('legacy handler')"><td><form action="http://fixture.test/asset_open.asp" method="post" target="_blank"><input type="hidden" name="asset" value="123"></form>same</td>${"<td>value</td>".repeat(10)}</tr></table><form name="nextPage" action="http://fixture.test/results" method="post"><input type="hidden" name="page" value="2"></form><a title="ถัดไป" data-target="nextPage" href="#">Next</a>`,
+    );
+    const detail = await openDetail(page, 0);
+    assert.match(await detail.innerText("body"), /asset details/);
+    await detail.close();
+    assert.equal(await advancePage(page), true);
+    assert.deepEqual(
+      submitted.map((r) => [r.method, r.body]),
+      [
+        ["POST", "asset=123"],
+        ["POST", "page=2"],
+      ],
+    );
+  } finally {
+    await browser.close();
+  }
+});
 test("legacy form-wrapped cells remain part of their asset row", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

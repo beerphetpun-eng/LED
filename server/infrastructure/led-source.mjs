@@ -16,6 +16,20 @@ import {
 // containing their own form are records; enclosing layout rows are not.
 const rowSelector =
   'tr:has(form[action*="asset_open"]):not(:has(tr form[action*="asset_open"]))';
+export async function openDetail(page, index) {
+  // Submit the source's own form: legacy inline row handlers can be missing
+  // or blocked by the source's CSP even though its public POST form is valid.
+  const [detail] = await Promise.all([
+    page.waitForEvent("popup", { timeout: 60000 }),
+    page
+      .locator(rowSelector)
+      .nth(index)
+      .locator('form[action*="asset_open"]')
+      .first()
+      .evaluate((form) => form.requestSubmit()),
+  ]);
+  return detail;
+}
 export async function waitForResultTable(page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 45000 });
   await page.waitForFunction(
@@ -58,7 +72,14 @@ export async function advancePage(page) {
     }),
     rowSelector,
   );
-  await next.click();
+  const submitted = await next.evaluate((link) => {
+    const form =
+      link.dataset.target && document.forms.namedItem(link.dataset.target);
+    if (!form) return false;
+    form.requestSubmit();
+    return true;
+  });
+  if (!submitted) await next.click();
   // Pagination may update the current document without a navigation event.
   await page.waitForFunction(
     ({ selector, before }) => {
@@ -235,10 +256,7 @@ export function createLedSource(
         );
         let detail;
         try {
-          [detail] = await Promise.all([
-            page.waitForEvent("popup", { timeout: 30000 }),
-            page.locator(rowSelector).nth(index).click(),
-          ]);
+          detail = await openDetail(page, index);
           await detail.waitForLoadState("domcontentloaded");
           await detail
             .getByText("รายการทรัพย์ที่จะขาย", { exact: true })

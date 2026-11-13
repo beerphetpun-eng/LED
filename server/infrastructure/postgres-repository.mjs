@@ -7,6 +7,7 @@ import {
   shouldExpire,
   validateUser,
   filterProperties,
+  missingParcelDeeds,
 } from "../domain/catalog.mjs";
 const local = JSON.parse(
   (
@@ -143,10 +144,7 @@ export async function upsertProperty(source, runId, retention) {
           };
     if (source.status !== "failed")
       merged = mergeComponents(old?.source, merged);
-    if (
-      merged.parcels.length &&
-      merged.parcels.every((p) => p.status === "located" && p.mapEvidenceUrl)
-    )
+    if (merged.deed && !missingParcelDeeds(merged).length)
       merged.status = "located";
     if (old)
       await queueFiles(
