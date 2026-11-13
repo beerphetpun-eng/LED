@@ -105,6 +105,7 @@ test("deletion exemptions are explicit and preserve user work", () => {
 test("display filters combine independently, with exact zero stars and null-safe ranges", () => {
   const base = {
     price: 1000000,
+    rawText: "จะทำการขายโดย ปลอดการจำนอง ราคาประเมิน 1,000,000 บาท",
     areaSqWa: 800,
     province: "เชียงใหม่",
     district: "เมืองเชียงใหม่",

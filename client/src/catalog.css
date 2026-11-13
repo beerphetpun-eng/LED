@@ -718,6 +718,25 @@ footer {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
+.mortgage-breakdown {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f5f7fa;
+  font-size: 12px;
+}
+.mortgage-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.mortgage-breakdown summary {
+  cursor: pointer;
+}
+.mortgage-breakdown p {
+  white-space: pre-line;
+}
 .discounts > div {
   padding: 10px 7px;
   border-radius: 7px;

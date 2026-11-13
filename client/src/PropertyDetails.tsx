@@ -52,25 +52,52 @@ export function PropertyDetails({
           </p>
         </div>
         <div className="full-price">
-          ฿ {money(p.price)}
-          <small>ราคาประเมินเต็มตามประกาศ</small>
+          ฿ {money(p.pricing.total)}
+          <small>
+            {p.pricing.carriesMortgage
+              ? "ราคารวมเต็ม · รวมจำนองติดไป"
+              : "ราคาประเมินเต็มตามประกาศ"}
+          </small>
         </div>
-        <div className="discounts">
-          {[10, 20, 30].map((discount) => (
-            <div key={discount}>
-              <small>ลด {discount}%</small>
-              <strong>
-                ฿{" "}
-                {money(
-                  p.price === null
-                    ? null
-                    : Math.round(p.price * (100 - discount)) / 100,
-                )}
-              </strong>
+        {p.pricing.carriesMortgage && (
+          <div className="mortgage-breakdown">
+            <div>
+              <span>ราคาประเมิน</span>
+              <strong>฿ {money(p.pricing.appraisal)}</strong>
             </div>
-          ))}
+            <div>
+              <span>หนี้จำนองติดไป (ไม่ลด)</span>
+              <strong>+ ฿ {money(p.pricing.mortgageDebt)}</strong>
+            </div>
+            <details>
+              <summary>เงื่อนไขจำนองจากประกาศ</summary>
+              <p>{p.pricing.mortgageClause}</p>
+            </details>
+          </div>
+        )}
+        {p.pricing.warning && (
+          <p role="alert" className="inline-error">
+            {p.pricing.warning}
+          </p>
+        )}
+        <div className="discounts">
+          {p.pricing.options
+            .filter((o) => o.discount > 0)
+            .map(({ discount, appraisal, total }) => (
+              <div key={discount}>
+                <small>ลด {discount}%</small>
+                <strong>฿ {money(total)}</strong>
+                {p.pricing.carriesMortgage && (
+                  <small>
+                    {money(appraisal)} + {money(p.pricing.mortgageDebt)}
+                  </small>
+                )}
+              </div>
+            ))}
         </div>
         <p className="muted small">
+          {p.pricing.carriesMortgage &&
+            "ลดเฉพาะราคาประเมิน หนี้จำนองติดไปคงเดิมทุกนัด · "}
           ราคาลดเป็นการคำนวณประกอบการพิจารณา
           ไม่ใช่ราคาเริ่มประมูลที่ยืนยันโดยต้นทาง
         </p>

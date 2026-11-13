@@ -69,6 +69,52 @@ try {
   assert.equal(bundle.syncCount, 2);
   assert.equal(bundle.user.comment, "verification");
   assert.equal(await db.fileReferenced("/evidence/db-smoke-two.png"), true);
+  const rawText =
+    "จะทำการขายโดย การจำนองติดไป ติดจำนอง ธนาคาร ยอดหนี้จำนอง 640,242.67 บาท ราคาประเมิน 300 บาท";
+  const beforeMigration = (
+    await db.pool.query(
+      "SELECT source,user_data FROM land_radar.properties WHERE id=$1",
+      [id],
+    )
+  ).rows[0];
+  const legacy = {
+    ...beforeMigration.source,
+    rawText,
+    assetComponents: bundle.assetComponents.map((c) => ({ ...c, rawText })),
+  };
+  delete legacy.pricing;
+  await db.pool.query(
+    "UPDATE land_radar.properties SET source=$2 WHERE id=$1",
+    [id, JSON.stringify(legacy)],
+  );
+  assert.equal(await db.migratePricing(), 1);
+  assert.equal(await db.migratePricing(), 0);
+  const stored = (
+    await db.pool.query(
+      "SELECT source,user_data FROM land_radar.properties WHERE id=$1",
+      [id],
+    )
+  ).rows[0];
+  assert.equal(stored.source.pricing.total, 640542.67);
+  assert.deepEqual(stored.user_data, beforeMigration.user_data);
+  const { pricing, ...unchanged } = stored.source;
+  assert.deepEqual(unchanged, legacy);
+  await db.updateSource(id, { price: 100 });
+  assert.equal((await db.getProperty(id)).pricing.total, 640342.67);
+  await db.upsertProperty(
+    { ...component, rawText, price: 200 },
+    "third",
+    "engaged",
+  );
+  const refreshed = await db.getProperty(id);
+  assert.equal(refreshed.pricing.total, 640442.67);
+  assert.equal(refreshed.syncCount, 3);
+  assert.equal(refreshed.user.comment, "verification");
+  assert.ok(
+    (
+      await db.queryProperties({ minPrice: "640442.67", maxPrice: "640442.67" })
+    ).items.some((p) => p.id === id),
+  );
   console.log(
     "PostgreSQL upsert, bundled assets, run counting and user annotations verified.",
   );

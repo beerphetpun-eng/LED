@@ -1,6 +1,7 @@
 import pg from "pg";
 import { readFile } from "node:fs/promises";
 import { mergeComponents } from "../domain/asset-components.mjs";
+import { pricingVersion, withPricing } from "../domain/pricing.mjs";
 import {
   defaultSettings,
   emptyUser,
@@ -43,6 +44,29 @@ CREATE TABLE IF NOT EXISTS land_radar.state(key text PRIMARY KEY, data jsonb NOT
 CREATE TABLE IF NOT EXISTS land_radar.file_gc(url text PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS land_radar.alerts(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), resolved boolean NOT NULL DEFAULT false);
 UPDATE land_radar.jobs SET data=jsonb_set(jsonb_set(data,'{status}','"interrupted"'),'{message}','"โปรแกรมปิดระหว่างทำงาน กรุณาเริ่มดึงใหม่ ข้อมูลที่บันทึกแล้วเปิดดูได้"') WHERE data->>'status' IN ('queued','searching','extracting','geocoding');`);
+  await migratePricing();
+}
+export async function migratePricing() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      "SELECT id,source FROM land_radar.properties WHERE source->'pricing'->>'version' IS DISTINCT FROM $1 FOR UPDATE",
+      [String(pricingVersion)],
+    );
+    for (const row of rows)
+      await client.query(
+        "UPDATE land_radar.properties SET source=$2 WHERE id=$1",
+        [row.id, JSON.stringify(withPricing(row.source))],
+      );
+    await client.query("COMMIT");
+    return rows.length;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 export async function health() {
   await pool.query("SELECT 1");
@@ -144,6 +168,7 @@ export async function upsertProperty(source, runId, retention) {
           };
     if (source.status !== "failed")
       merged = mergeComponents(old?.source, merged);
+    merged = withPricing(merged);
     if (merged.deed && !missingParcelDeeds(merged).length)
       merged.status = "located";
     if (old)
@@ -167,7 +192,7 @@ export async function upsertProperty(source, runId, retention) {
 }
 function hydrate(row) {
   return {
-    ...row.source,
+    ...withPricing(row.source),
     user: { ...emptyUser(), ...row.user_data },
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
@@ -211,7 +236,7 @@ export async function queryProperties(filters) {
         ),
       ].sort(),
       types: [...new Set(all.map((p) => p.propertyType))].sort(),
-      maxPrice: Math.max(0, ...all.map((p) => p.price || 0)),
+      maxPrice: Math.max(0, ...all.map((p) => p.pricing.total || 0)),
       maxRai: Math.max(0, ...all.map((p) => (p.areaSqWa || 0) / 400)),
     },
   };
@@ -240,7 +265,7 @@ export async function updateSource(id, patch) {
       await client.query("COMMIT");
       throw Error("ทรัพย์ถูกลบแล้ว ไม่สามารถบันทึกหลักฐานเพิ่มได้");
     }
-    const merged = { ...old, ...patch };
+    const merged = withPricing({ ...old, ...patch });
     await queueFiles(
       client,
       files(old).filter((url) => !files(merged).includes(url)),
