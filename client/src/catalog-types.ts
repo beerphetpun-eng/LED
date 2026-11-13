@@ -30,6 +30,9 @@ export type FacebookResult = {
 };
 export type Property = {
   id: string;
+  componentKey?: string;
+  address?: string;
+  assetComponents?: Property[];
   propertyType: string;
   province: string;
   district: string;
@@ -45,6 +48,8 @@ export type Property = {
   areaText: string;
   auctionDates: string[];
   screenshotUrl: string;
+  evidenceReady?: boolean;
+  evidenceImages?: { total: number; loaded: number; checkedAt: string };
   parcels: Parcel[];
   status: string;
   error?: string;
@@ -69,12 +74,12 @@ export type Runtime = {
   running: boolean;
   status: string;
   message: string;
-  captchaUrl?: string;
   pages?: number;
   seen?: number;
   skippedRed?: number;
   skippedExisting?: number;
   nextRunAt?: string;
+  geoRetryAt?: string | null;
   scopeIndex?: number;
   scopeCount?: number;
   geoDone?: number;

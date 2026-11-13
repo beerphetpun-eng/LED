@@ -1,11 +1,13 @@
 import pg from "pg";
 import { readFile } from "node:fs/promises";
+import { mergeComponents } from "../domain/asset-components.mjs";
 import {
   defaultSettings,
   emptyUser,
   shouldExpire,
   validateUser,
   filterProperties,
+  missingParcelDeeds,
 } from "../domain/catalog.mjs";
 const local = JSON.parse(
   (
@@ -72,7 +74,7 @@ export async function alert(message) {
 export async function alerts() {
   return (
     await pool.query(
-      'SELECT id::text,message,created_at AS "createdAt" FROM land_radar.alerts WHERE resolved=false ORDER BY id DESC LIMIT 100',
+      'SELECT id::text,message,created_at AS "createdAt" FROM land_radar.alerts WHERE resolved=false ORDER BY land_radar.alerts.id DESC',
     )
   ).rows;
 }
@@ -132,7 +134,7 @@ export async function upsertProperty(source, runId, retention) {
       ["deed", "province", "district", "subdistrict"].every(
         (k) => old.source[k] === source[k],
       );
-    const merged =
+    let merged =
       source.status === "failed" && old
         ? { ...old.source, error: source.error }
         : {
@@ -140,10 +142,9 @@ export async function upsertProperty(source, runId, retention) {
             parcels: sameParcel ? old.source.parcels || [] : [],
             facebook: old?.source.facebook || null,
           };
-    if (
-      merged.parcels.length &&
-      merged.parcels.every((p) => p.status === "located" && p.mapEvidenceUrl)
-    )
+    if (source.status !== "failed")
+      merged = mergeComponents(old?.source, merged);
+    if (merged.deed && !missingParcelDeeds(merged).length)
       merged.status = "located";
     if (old)
       await queueFiles(
@@ -188,12 +189,15 @@ export async function allProperties() {
 export async function queryProperties(filters) {
   const all = await allProperties(),
     items = filterProperties(all, filters);
-  const summary = items.map(({ rawText, sourceRow, facebook, ...p }) => ({
-    ...p,
-    facebook: facebook
-      ? { checkedAt: facebook.checkedAt, count: facebook.posts?.length || 0 }
-      : null,
-  }));
+  const summary = items.map(
+    ({ rawText, sourceRow, facebook, assetComponents, ...p }) => ({
+      ...p,
+      assetComponentCount: assetComponents?.length || 1,
+      facebook: facebook
+        ? { checkedAt: facebook.checkedAt, count: facebook.posts?.length || 0 }
+        : null,
+    }),
+  );
   return {
     items: summary,
     total: all.length,

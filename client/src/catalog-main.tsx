@@ -75,7 +75,6 @@ function App() {
     [tab, setTab] = useState("explore"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
-    [captcha, setCaptcha] = useState(""),
     [full, setFull] = useState(false),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
@@ -320,42 +319,6 @@ function App() {
             </div>
           </details>
         )}
-        {sync?.runtime.status === "waiting_captcha" && (
-          <form
-            className="captcha-bar"
-            onSubmit={(e) => {
-              e.preventDefault();
-              act("ส่งรหัส", async () => {
-                await api("/sync/captcha", "POST", { code: captcha });
-                setCaptcha("");
-                await loadSync();
-              });
-            }}
-          >
-            <div>
-              <strong>ซิงค์รอรหัสยืนยัน</strong>
-              <span>{sync.runtime.message}</span>
-            </div>
-            <img
-              src={sync.runtime.captchaUrl}
-              alt="รหัสยืนยันจากกรมบังคับคดี"
-            />
-            <input
-              aria-label="รหัสยืนยัน"
-              placeholder="รหัส 6 หลัก"
-              inputMode="numeric"
-              maxLength={6}
-              value={captcha}
-              onChange={(e) => setCaptcha(e.target.value.replace(/\D/g, ""))}
-            />
-            <button
-              className="primary"
-              disabled={captcha.length !== 6 || !!busy}
-            >
-              ยืนยันและซิงค์ต่อ
-            </button>
-          </form>
-        )}
       </div>
       <section className="sync-strip">
         <div>
@@ -367,9 +330,19 @@ function App() {
           <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
           <small>
             {sync?.runtime.running
-              ? `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
+              ? sync.runtime.status === "geocoding"
+                ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
+                : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
               : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
           </small>
+          {sync?.runtime.geoRetryAt && (
+            <small>
+              {sync.settings.enabled
+                ? "ค้นพิกัดต่ออัตโนมัติ"
+                : "ครบเวลารอโควตา"}{" "}
+              {time(sync.runtime.geoRetryAt)}
+            </small>
+          )}
         </div>
         <div className="sync-actions">
           {sync?.runtime.running ? (
@@ -398,7 +371,14 @@ function App() {
                 ซิงค์ด้วยตนเอง
               </button>
               <button
-                disabled={!!busy || !library.total}
+                disabled={
+                  !!busy ||
+                  !library.total ||
+                  !!(
+                    sync?.runtime.geoRetryAt &&
+                    Date.parse(sync.runtime.geoRetryAt) > Date.now()
+                  )
+                }
                 onClick={() =>
                   act("ค้นพิกัด", async () => {
                     await api("/sync/geocode", "POST");
@@ -699,7 +679,7 @@ function App() {
                 <p>
                   {library.total
                     ? "ลองปรับราคา พื้นที่ หรือดาวที่เลือก"
-                    : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กรอกรหัสยืนยันด้านบนเพื่อเริ่มดึงข้อมูล"}
+                    : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กดซิงค์เพื่อเริ่มดึงข้อมูล"}
                 </p>
               </div>
             )}

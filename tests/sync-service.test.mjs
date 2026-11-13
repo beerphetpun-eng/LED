@@ -1,13 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSyncService } from "../server/application/sync-service.mjs";
+import { SourceRateLimitError } from "../server/domain/errors.mjs";
 const settings = {
   enabled: true,
   intervalHours: 168,
   retention: "manual",
   scopes: [{ provinceCode: "50", districtCodes: ["5001", "5002"] }],
 };
-function setup(fail = false) {
+function setup(
+  fail = false,
+  hang = false,
+  geocoder = {},
+  clock = () => new Date("2026-11-12T12:00:00Z"),
+) {
   let saved = structuredClone(settings);
   const states = {},
     records = new Map(),
@@ -33,13 +39,17 @@ function setup(fail = false) {
     completeFile: async () => {},
     allProperties: async () => [...records.values()],
     upsertProperty: async (p, run) => records.set(p.id, p),
-    updateSource: async () => {},
+    updateSource: async (id, patch) =>
+      records.set(id, { ...records.get(id), ...patch }),
   };
   const source = {
-    prepareScope: async () => ({ captchaUrl: "/api/captcha" }),
-    extract: async (j, c, s, save) => {
+    prepareScope: async () => ({}),
+    extract: async (j, s, save) => {
       extracts++;
-      assert.equal(c, "123456");
+      if (hang)
+        await new Promise((resolve, reject) =>
+          s.addEventListener("abort", () => reject(s.reason), { once: true }),
+        );
       if (fail) throw Error("source changed");
       j.properties = [
         {
@@ -58,12 +68,12 @@ function setup(fail = false) {
       await save(j);
     },
   };
-  const service = createSyncService({
+  const options = {
     repository,
     source,
-    geocoder: {},
+    geocoder,
     files: {},
-    clock: () => new Date("2026-11-12T12:00:00Z"),
+    clock,
     geography: {
       provinces: [
         {
@@ -76,11 +86,14 @@ function setup(fail = false) {
         },
       ],
     },
-  });
+  };
+  const service = createSyncService(options);
   return {
     service,
     records,
     messages,
+    states,
+    options,
     get extracts() {
       return extracts;
     },
@@ -96,23 +109,11 @@ async function waitFor(s, status) {
   }
   throw Error("did not enter " + status);
 }
-test("scheduler waits visibly for a human code and serializes multiple scopes", async () => {
+
+test("scheduler processes all scopes without waiting for user input", async () => {
   const t = setup();
   await t.service.init();
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
-  assert.equal(t.extracts, 0);
-  const cleanupCount = t.cleanups;
-  await t.service.tick();
-  assert.ok(t.cleanups > cleanupCount);
-  assert.equal(t.service.status().status, "waiting_captcha");
-  await assert.rejects(t.service.start(), /กำลัง/);
-  assert.throws(() => t.service.submitCaptcha("bad"));
-  t.service.submitCaptcha("123456");
-  for (let i = 0; i < 100 && t.extracts === 0; i++)
-    await new Promise((r) => setTimeout(r, 2));
-  await waitFor(t.service, "waiting_captcha");
-  t.service.submitCaptcha("123456");
   await t.service.task;
   assert.equal(t.extracts, 2);
   assert.equal(t.records.size, 1);
@@ -123,21 +124,146 @@ test("scheduler waits visibly for a human code and serializes multiple scopes", 
   assert.equal(t.extracts, 2);
   assert.equal(t.service.running, false);
 });
-test("cancel while waiting releases the queue without submitting a search", async () => {
-  const t = setup();
+test("daily quota pauses the parcel queue for 302 minutes and resumes after restart without duplicating source retrieval", async () => {
+  let now = new Date("2026-11-12T12:00:00Z"),
+    limited = true,
+    calls = 0;
+  const t = setup(
+    false,
+    false,
+    {
+      locate: async (p, deed) => {
+        calls++;
+        if (limited) throw new SourceRateLimitError("เกินจำกัด 20 /วัน");
+        return {
+          deed,
+          status: "located",
+          mapEvidenceUrl: "/evidence/map.png",
+          backgroundReady: true,
+        };
+      },
+    },
+    () => now,
+  );
+  t.states.sync_runtime = {
+    status: "completed",
+    nextRunAt: "2026-11-19T12:00:00.000Z",
+  };
+  t.records.set("a", { id: "a", deed: "1", parcels: [], status: "pending" });
+  t.records.set("b", { id: "b", deed: "2", parcels: [], status: "pending" });
+  await t.service.init();
+  await t.service.start(true);
+  await t.service.task;
+  assert.equal(calls, 1);
+  assert.equal(t.service.status().status, "waiting_limit");
+  assert.equal(t.service.status().geoRetryAt, "2026-11-12T17:02:00.000Z");
+  assert.equal(t.records.get("a").parcels.length, 0);
+  await assert.rejects(t.service.start(true), /รอโควตา/);
+  await t.service.tick();
+  assert.equal(calls, 1);
+  const restarted = createSyncService(t.options);
+  await restarted.init();
+  assert.equal(restarted.status().status, "waiting_limit");
+  now = new Date("2026-11-12T17:02:00Z");
+  limited = false;
+  await restarted.tick();
+  await restarted.task;
+  assert.equal(calls, 3);
+  assert.equal(t.extracts, 0);
+  assert.equal(restarted.status().geoRetryAt, null);
+  assert.equal(restarted.status().status, "completed");
+  assert.equal(restarted.status().nextRunAt, "2026-11-19T12:00:00.000Z");
+});
+test("verified exact parcels are reused across listings without spending another source query", async () => {
+  let calls = 0;
+  const t = setup(false, false, {
+    locate: async () => {
+      calls++;
+      throw Error("must reuse evidence");
+    },
+  });
+  const geography = {
+    province: "เชียงใหม่",
+    district: "เมืองเชียงใหม่",
+    subdistrict: "สุเทพ",
+  };
+  t.records.set("known", {
+    id: "known",
+    ...geography,
+    deed: "1",
+    status: "located",
+    parcels: [
+      {
+        deed: "1",
+        status: "located",
+        mapEvidenceUrl: "/evidence/map.png",
+        backgroundReady: true,
+      },
+    ],
+  });
+  t.records.set("new", {
+    id: "new",
+    ...geography,
+    deed: "1",
+    status: "pending",
+    parcels: [],
+  });
+  await t.service.start(true);
+  await t.service.task;
+  assert.equal(calls, 0);
+  assert.equal(t.records.get("new").status, "located");
+  assert.equal(
+    t.records.get("new").parcels[0].mapEvidenceUrl,
+    "/evidence/map.png",
+  );
+});
+test("cancellation releases an automatic sync and prevents overlapping runs", async () => {
+  const t = setup(false, true);
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
+  await waitFor(t.service, "extracting");
+  await assert.rejects(t.service.start(), /กำลัง/);
   t.service.cancel();
   await t.service.task;
-  assert.equal(t.extracts, 0);
   assert.equal(t.service.status().status, "cancelled");
 });
 test("source errors persist an alert and incomplete status", async () => {
   const t = setup(true);
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
-  t.service.submitCaptcha("123456");
   await t.service.task;
   assert.equal(t.service.status().status, "partial");
   assert.deepEqual(t.messages, ["source changed"]);
+});
+test("new deeds in an existing bundle are geocoded without repeating complete parcels", async () => {
+  const seen = [];
+  const t = setup(false, false, {
+    locate: async (record, deed) => {
+      seen.push([record.subdistrict, deed]);
+      return {
+        deed,
+        status: "located",
+        mapEvidenceUrl: "/evidence/new-map.png",
+        backgroundReady: true,
+      };
+    },
+  });
+  t.records.set("bundle", {
+    id: "bundle",
+    deed: "1, 2",
+    status: "pending",
+    subdistrict: "first",
+    assetComponents: [{ deed: "2", subdistrict: "second" }],
+    parcels: [
+      {
+        deed: "1",
+        status: "located",
+        mapEvidenceUrl: "/evidence/old-map.png",
+        backgroundReady: true,
+      },
+    ],
+  });
+  await t.service.start(true);
+  await t.service.task;
+  assert.deepEqual(seen, [["second", "2"]]);
+  assert.equal(t.records.get("bundle").parcels.length, 2);
+  assert.equal(t.records.get("bundle").status, "located");
 });

@@ -14,6 +14,21 @@ export const defaultSettings = () => ({
   scopes: [{ provinceCode: "50", districtCodes: ["5001"] }],
   retention: "manual",
 });
+export function missingParcelDeeds(property) {
+  return (property.deed || "")
+    .split(", ")
+    .filter(Boolean)
+    .filter(
+      (deed) =>
+        !(property.parcels || []).some(
+          (p) =>
+            p.deed === deed &&
+            p.status === "located" &&
+            p.mapEvidenceUrl &&
+            p.backgroundReady !== false,
+        ),
+    );
+}
 export function propertyId(row) {
   if (![row[0], row[1], row[2], row[10]].every((v) => clean(v)))
     throw Error("ต้นทางไม่มีรหัสชุด/ลำดับ/คดี/จังหวัดสำหรับแยกทรัพย์");

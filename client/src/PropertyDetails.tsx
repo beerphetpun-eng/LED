@@ -213,6 +213,41 @@ export function PropertyDetails({
             </span>
           </button>
         )}
+        {p.screenshotUrl && (
+          <p className="small muted">
+            {p.evidenceReady
+              ? `ตรวจรูปในหน้าประกาศก่อนแคปแล้ว ${p.evidenceImages?.loaded ?? ""}/${p.evidenceImages?.total ?? ""} รูป`
+              : p.evidenceReady === false
+                ? "ภาพประกาศยังโหลดไม่ครบ รอเก็บใหม่ในการซิงค์ถัดไป"
+                : "ภาพเดิม รอตรวจสอบและเก็บใหม่ในการซิงค์ถัดไป"}
+          </p>
+        )}
+        {(p.assetComponents?.length || 0) > 1 && (
+          <section>
+            <h3>ทรัพย์ย่อยในประกาศขายรวม ({p.assetComponents!.length})</h3>
+            <p className="small muted">
+              ราคาเต็มด้านบนเป็นราคาของประกาศขายรวม
+              ตรวจเงื่อนไขจากภาพต้นฉบับของแต่ละรายการ
+            </p>
+            <div className="evidence-pair">
+              {p.assetComponents!.map((c) => (
+                <button
+                  key={c.componentKey}
+                  onClick={() => onImage(c.screenshotUrl)}
+                >
+                  <img
+                    loading="lazy"
+                    src={c.screenshotUrl}
+                    alt={`ประกาศทรัพย์ย่อย เลขที่ ${c.address || "ไม่ระบุ"}`}
+                  />
+                  <span>
+                    เลขที่ {c.address || "ไม่ระบุ"} · {c.areaText}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         <h3>หลักฐาน LandsMaps</h3>
         {p.parcels.length === 0 && (
           <p className="muted">ยังไม่มีพิกัดที่ยืนยันได้</p>
