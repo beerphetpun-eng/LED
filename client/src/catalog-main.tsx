@@ -604,6 +604,24 @@ function App() {
                   รายการทรัพย์ <span>{library.items.length}</span>
                 </button>
               </div>
+              <dl className="stats" aria-label="สรุปผลค้นหา">
+                <div>
+                  <dt>ทั้งหมด</dt>
+                  <dd>{library.total}</dd>
+                </div>
+                <div>
+                  <dt>ตรงตัวกรอง</dt>
+                  <dd>{library.items.length}</dd>
+                </div>
+                <div>
+                  <dt>ทรัพย์มีพิกัด</dt>
+                  <dd>{mapped.length}</dd>
+                </div>
+                <div>
+                  <dt>หมุด</dt>
+                  <dd>{pins.length}</dd>
+                </div>
+              </dl>
               {view === "list" && (
                 <label className="list-mode">
                   มุมมอง
@@ -621,24 +639,6 @@ function App() {
                 </label>
               )}
             </div>
-            <dl className="stats" aria-label="สรุปผลค้นหา">
-              <div>
-                <dt>ทั้งหมด</dt>
-                <dd>{library.total}</dd>
-              </div>
-              <div>
-                <dt>ตรงตัวกรอง</dt>
-                <dd>{library.items.length}</dd>
-              </div>
-              <div>
-                <dt>ทรัพย์มีพิกัด</dt>
-                <dd>{mapped.length}</dd>
-              </div>
-              <div>
-                <dt>หมุด</dt>
-                <dd>{pins.length}</dd>
-              </div>
-            </dl>
             <section
               id="property-map"
               role="tabpanel"
