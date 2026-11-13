@@ -233,6 +233,16 @@ function App() {
       await loadSync();
     });
   }
+  async function refreshPhotos(id: string) {
+    const result = await api<{
+      property: Property;
+      checked: number;
+      requested: number;
+      complete: boolean;
+    }>(`/properties/${id}/photos/refresh`, "POST");
+    if (selectedId.current === id) setSelected(result.property);
+    return result;
+  }
   function exportJSON() {
     const blob = new Blob([JSON.stringify(library.items, null, 2)], {
         type: "application/json",
@@ -815,6 +825,7 @@ function App() {
           onClose={() => setSelected(null)}
           onSave={(u) => saveUser(u)}
           onFacebook={(d) => facebook(d)}
+          onRefreshPhotos={() => refreshPhotos(selected.id)}
           onImage={setImage}
         />
       )}
