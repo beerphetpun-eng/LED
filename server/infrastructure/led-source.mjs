@@ -1,7 +1,7 @@
 import { propertyId, detailIdentity } from "../domain/catalog.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { LED } from "./browser-service.mjs";
-import { waitForEvidenceImages } from "./evidence-images.mjs";
+import { evidenceVersion, waitForEvidenceImages } from "./evidence-images.mjs";
 import { componentKey } from "../domain/asset-components.mjs";
 import {
   clean,
@@ -229,7 +229,7 @@ export function createLedSource(
           existing?.rawText &&
           existing.screenshotUrl &&
           existing.evidenceReady === true &&
-          existing.evidenceVersion === 2 &&
+          existing.evidenceVersion === evidenceVersion &&
           JSON.stringify(existing.sourceRow) === JSON.stringify(c)
         ) {
           const { user, firstSeen, lastSeen, syncCount, ...previous } =
@@ -267,8 +267,20 @@ export function createLedSource(
                 .getByText("รายการทรัพย์ที่จะขาย", { exact: true })
                 .waitFor({ timeout: 30000 });
               raw = await detail.innerText("body");
-              evidence = await checkImages(detail, signal);
-              if (evidence.ready || attempt === 2) break;
+              evidence = await checkImages(detail, signal, {
+                requirePhoto: true,
+              });
+              if (evidence.ready) break;
+              if (attempt === 2) {
+                if (
+                  fallback &&
+                  compareCaptures(fallback.evidence, evidence) > 0
+                ) {
+                  await detail.close();
+                  ({ detail, raw, evidence } = fallback);
+                }
+                break;
+              }
               fallback = { detail, raw, evidence };
               detail = null;
             } catch (e) {
@@ -291,11 +303,19 @@ export function createLedSource(
           p.sourceTitle = await detail.title();
           p.evidenceReady = evidence.ready;
           p.evidenceImages = evidence;
-          p.evidenceVersion = 2;
-          p.screenshotUrl = await browser.screenshot(
-            detail,
-            `${p.id}-led-${Date.now()}`,
-          );
+          p.evidenceVersion = evidenceVersion;
+          const retainExisting =
+            !evidence.ready &&
+            existing?.screenshotUrl &&
+            JSON.stringify(existing.sourceRow) === JSON.stringify(c) &&
+            (existing.evidenceReady === true ||
+              existing.evidenceImages?.previousCaptureKept ||
+              compareCaptures(existing.evidenceImages, evidence) > 0);
+          p.screenshotUrl = retainExisting
+            ? existing.screenshotUrl
+            : await browser.screenshot(detail, `${p.id}-led-${Date.now()}`);
+          if (retainExisting)
+            p.evidenceImages = { ...evidence, previousCaptureKept: true };
           p.deed = deeds(raw).join(", ");
           p.auctionDates = dates(raw);
           if (!p.deed || !p.auctionDates.length) {
@@ -308,7 +328,9 @@ export function createLedSource(
             p.status = "needs_review";
             p.error = [
               p.error,
-              `ภาพประกาศยังโหลดไม่ครบ (${evidence.loaded}/${evidence.total} รูป) ระบบจะลองเก็บใหม่ในรอบถัดไป`,
+              evidence.photos
+                ? `รูปถ่ายทรัพย์จากต้นทางยังตรวจได้ไม่ครบ (${evidence.photos.loaded}/${evidence.photos.total} รูป) ระบบจะลองเก็บใหม่ในรอบถัดไป`
+                : `ภาพประกาศยังโหลดไม่ครบ (${evidence.loaded}/${evidence.total} รูป) ระบบจะลองเก็บใหม่ในรอบถัดไป`,
             ]
               .filter(Boolean)
               .join(" · ");
@@ -360,4 +382,10 @@ export function createLedSource(
     },
     extract,
   };
+}
+
+function compareCaptures(a, b) {
+  if (a?.photos && b?.photos && a.photos.loaded !== b.photos.loaded)
+    return a.photos.loaded - b.photos.loaded;
+  return (a?.loaded || 0) - (b?.loaded || 0);
 }

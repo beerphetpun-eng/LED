@@ -42,11 +42,13 @@ const emptyLibrary: Library = {
 function ViewMap({
   items,
   full,
+  visible,
   selected,
   focusSelected,
 }: {
   items: Property[];
   full: boolean;
+  visible: boolean;
   selected: Property | null;
   focusSelected: boolean;
 }) {
@@ -57,26 +59,34 @@ function ViewMap({
       .map((v) => [v.latitude!, v.longitude!] as [number, number]),
   );
   const key = JSON.stringify(coordinates);
+  const fittedView = useRef("");
   useEffect(() => {
-    const observer = new ResizeObserver(() => map.invalidateSize());
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width && entry.contentRect.height)
+        map.invalidateSize();
+    });
     observer.observe(map.getContainer());
     return () => observer.disconnect();
   }, [map]);
   useEffect(() => {
+    if (!visible) return;
     map.invalidateSize();
+    const view = `${full}:${key}`;
+    if (fittedView.current === view) return;
+    fittedView.current = view;
     if (coordinates.length && !selected)
       map.fitBounds(L.latLngBounds(coordinates), {
         padding: [45, 45],
         maxZoom: 14,
       });
-  }, [key, full]);
+  }, [key, full, visible]);
   useEffect(() => {
-    if (!focusSelected) return;
+    if (!focusSelected || !visible) return;
     const p = selected?.parcels.find(
       (v) => v.latitude !== null && v.longitude !== null,
     );
     if (p) map.flyTo([p.latitude!, p.longitude!], 16);
-  }, [selected?.id, focusSelected]);
+  }, [selected?.id, focusSelected, visible]);
   return null;
 }
 function App() {
@@ -88,8 +98,8 @@ function App() {
     [busy, setBusy] = useState(""),
     [full, setFull] = useState(false),
     [filtersCollapsed, setFiltersCollapsed] = useState(true),
-    [listVisible, setListVisible] = useState(false),
-    [listMode, setListMode] = useState<"cards" | "table">("cards"),
+    [view, setView] = useState<"map" | "list">("map"),
+    [listMode, setListMode] = useState<"cards" | "table">("table"),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
     [focusSelected, setFocusSelected] = useState(false),
@@ -550,6 +560,67 @@ function App() {
             </label>
           </aside>
           <section className="results">
+            <div className="results-toolbar">
+              <div
+                className="result-tabs"
+                role="tablist"
+                aria-label="มุมมองผลค้นหา"
+                onKeyDown={(e) => {
+                  if (
+                    !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)
+                  )
+                    return;
+                  e.preventDefault();
+                  const next =
+                    e.key === "Home"
+                      ? "map"
+                      : e.key === "End"
+                        ? "list"
+                        : view === "map"
+                          ? "list"
+                          : "map";
+                  setView(next);
+                  document.getElementById(`${next}-tab`)?.focus();
+                }}
+              >
+                <button
+                  id="map-tab"
+                  role="tab"
+                  aria-selected={view === "map"}
+                  tabIndex={view === "map" ? 0 : -1}
+                  aria-controls="property-map"
+                  onClick={() => setView("map")}
+                >
+                  <MapPin size={16} /> แผนที่
+                </button>
+                <button
+                  id="list-tab"
+                  role="tab"
+                  aria-selected={view === "list"}
+                  tabIndex={view === "list" ? 0 : -1}
+                  aria-controls="property-list"
+                  onClick={() => setView("list")}
+                >
+                  รายการทรัพย์ <span>{library.items.length}</span>
+                </button>
+              </div>
+              {view === "list" && (
+                <label className="list-mode">
+                  มุมมอง
+                  <select
+                    value={listMode}
+                    onChange={(e) =>
+                      setListMode(
+                        e.target.value === "table" ? "table" : "cards",
+                      )
+                    }
+                  >
+                    <option value="table">ตาราง</option>
+                    <option value="cards">การ์ด</option>
+                  </select>
+                </label>
+              )}
+            </div>
             <div className="stats">
               <div>
                 <span>ทรัพย์ทั้งหมด</span>
@@ -568,165 +639,151 @@ function App() {
                 <strong>{pins.length}</strong>
               </div>
             </div>
-            <div className={full ? "map-shell expanded" : "map-shell"}>
-              <div className="map-label">
-                <MapPin size={15} />
-                แผนที่ทรัพย์ <b>{pins.length} หมุด</b>
+            <section
+              id="property-map"
+              role="tabpanel"
+              aria-labelledby="map-tab"
+              hidden={view !== "map"}
+            >
+              <div className={full ? "map-shell expanded" : "map-shell"}>
+                <div className="map-label">
+                  <MapPin size={15} />
+                  แผนที่ทรัพย์ <b>{pins.length} หมุด</b>
+                </div>
+                <button
+                  className="expand-map"
+                  aria-label={full ? "ย่อแผนที่" : "ขยายแผนที่"}
+                  onClick={() => setFull((v) => !v)}
+                >
+                  {full ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <MapContainer
+                  center={[18.7883, 98.9853]}
+                  zoom={10}
+                  zoomControl={true}
+                >
+                  <TileLayer
+                    url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+                  />
+                  <ViewMap
+                    items={library.items}
+                    full={full}
+                    visible={view === "map" && tab === "explore"}
+                    selected={selected}
+                    focusSelected={focusSelected}
+                  />
+                  {pins.map(({ p, v }) => (
+                    <Marker
+                      key={p.id + v.deed}
+                      position={[v.latitude!, v.longitude!]}
+                      icon={L.divIcon({
+                        className: "price-marker",
+                        html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
+                        iconSize: [105, 35],
+                        iconAnchor: [52, 35],
+                      })}
+                      eventHandlers={{
+                        click: () => {
+                          void select(p, false).catch(() => {});
+                        },
+                      }}
+                    >
+                      <Popup autoPan={false}>
+                        <b>{p.propertyType}</b>
+                        <p>
+                          ลำดับ {p.assetSequence} · คดี {p.caseNumber}
+                        </p>
+                        <button
+                          onClick={() => void select(p, false).catch(() => {})}
+                        >
+                          ดูรายละเอียดและภาพ
+                        </button>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+                {!pins.length && (
+                  <div className="map-empty">
+                    {library.items.length
+                      ? "เปิดแท็บรายการทรัพย์เพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
+                      : "ผลค้นหาจะแสดงบนแผนที่นี้"}
+                    <small>ปักหมุดเฉพาะพิกัดที่ค้นพบจริงจาก LandsMaps</small>
+                  </div>
+                )}
               </div>
-              <button
-                className="expand-map"
-                aria-label={full ? "ย่อแผนที่" : "ขยายแผนที่"}
-                onClick={() => setFull((v) => !v)}
-              >
-                {full ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-              </button>
-              <MapContainer
-                center={[18.7883, 98.9853]}
-                zoom={10}
-                zoomControl={true}
-              >
-                <TileLayer
-                  url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-                />
-                <ViewMap
+            </section>
+            <section
+              id="property-list"
+              role="tabpanel"
+              aria-labelledby="list-tab"
+              hidden={view !== "list"}
+            >
+              {listMode === "table" ? (
+                <PropertyTable
                   items={library.items}
-                  full={full}
-                  selected={selected}
-                  focusSelected={focusSelected}
+                  onSelect={(p) => void select(p).catch(() => {})}
                 />
-                {pins.map(({ p, v }) => (
-                  <Marker
-                    key={p.id + v.deed}
-                    position={[v.latitude!, v.longitude!]}
-                    icon={L.divIcon({
-                      className: "price-marker",
-                      html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
-                      iconSize: [105, 35],
-                      iconAnchor: [52, 35],
-                    })}
-                    eventHandlers={{
-                      click: () => {
-                        void select(p, false).catch(() => {});
-                      },
-                    }}
-                  >
-                    <Popup autoPan={false}>
-                      <b>{p.propertyType}</b>
+              ) : (
+                <div className="property-grid">
+                  {library.items.map((p) => (
+                    <button
+                      className="property-card"
+                      key={p.id}
+                      onClick={() => void select(p).catch(() => {})}
+                    >
+                      <div className="card-top">
+                        <span>ลำดับ {p.assetSequence}</span>
+                        <span>
+                          {p.user.bookmarked && (
+                            <Bookmark size={14} fill="currentColor" />
+                          )}
+                          {p.user.stars > 0 && (
+                            <>
+                              <Star size={14} fill="currentColor" />
+                              {p.user.stars}
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <h3>{p.propertyType}</h3>
                       <p>
-                        ลำดับ {p.assetSequence} · คดี {p.caseNumber}
+                        {p.subdistrict} · {p.district}
                       </p>
-                      <button
-                        onClick={() => void select(p, false).catch(() => {})}
-                      >
-                        ดูรายละเอียดและภาพ
-                      </button>
-                    </Popup>
-                  </Marker>
-                ))}
-              </MapContainer>
-              {!pins.length && (
-                <div className="map-empty">
-                  {library.items.length
-                    ? "เปิดรายการทรัพย์ด้านล่างเพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
-                    : "ผลค้นหาจะแสดงบนแผนที่นี้"}
-                  <small>ปักหมุดเฉพาะพิกัดที่ค้นพบจริงจาก LandsMaps</small>
+                      <small>
+                        คดี {p.caseNumber} · โฉนด {p.deed || "—"}
+                      </small>
+                      <div className="card-bottom">
+                        <span>{p.areaText}</span>
+                        <strong>฿ {money(p.pricing.total)}</strong>
+                      </div>
+                      {p.pricing.carriesMortgage && (
+                        <small>รวมจำนองติดไป</small>
+                      )}
+                      {p.pricing.warning && (
+                        <small className="inline-error">
+                          {p.pricing.warning}
+                        </small>
+                      )}
+                      <div className="card-status">
+                        <span>
+                          {p.parcels.some((v) => v.latitude !== null)
+                            ? "พบพิกัด"
+                            : "รอพิกัด / ตรวจสอบ"}
+                        </span>
+                        <span>
+                          {p.user.auctionStatus === "ended"
+                            ? "จบประมูลแล้ว"
+                            : p.user.auctionStatus === "auctioning"
+                              ? "อยู่ระหว่างประมูล"
+                              : "ยังไม่ระบุสถานะ"}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
-            </div>
-            <div className="list-title">
-              <button
-                aria-expanded={listVisible}
-                aria-controls="property-list"
-                onClick={() => setListVisible(!listVisible)}
-              >
-                {listVisible ? "ซ่อนรายการทรัพย์" : "แสดงรายการทรัพย์"}{" "}
-                <span>{library.items.length}</span>
-              </button>
-              {listVisible && (
-                <label className="list-mode">
-                  มุมมอง
-                  <select
-                    value={listMode}
-                    onChange={(e) =>
-                      setListMode(
-                        e.target.value === "table" ? "table" : "cards",
-                      )
-                    }
-                  >
-                    <option value="cards">การ์ด</option>
-                    <option value="table">ตาราง</option>
-                  </select>
-                </label>
-              )}
-            </div>
-            <section id="property-list" hidden={!listVisible}>
-              {listVisible &&
-                (listMode === "table" ? (
-                  <PropertyTable
-                    items={library.items}
-                    onSelect={(p) => void select(p).catch(() => {})}
-                  />
-                ) : (
-                  <div className="property-grid">
-                    {library.items.map((p) => (
-                      <button
-                        className="property-card"
-                        key={p.id}
-                        onClick={() => void select(p).catch(() => {})}
-                      >
-                        <div className="card-top">
-                          <span>ลำดับ {p.assetSequence}</span>
-                          <span>
-                            {p.user.bookmarked && (
-                              <Bookmark size={14} fill="currentColor" />
-                            )}
-                            {p.user.stars > 0 && (
-                              <>
-                                <Star size={14} fill="currentColor" />
-                                {p.user.stars}
-                              </>
-                            )}
-                          </span>
-                        </div>
-                        <h3>{p.propertyType}</h3>
-                        <p>
-                          {p.subdistrict} · {p.district}
-                        </p>
-                        <small>
-                          คดี {p.caseNumber} · โฉนด {p.deed || "—"}
-                        </small>
-                        <div className="card-bottom">
-                          <span>{p.areaText}</span>
-                          <strong>฿ {money(p.pricing.total)}</strong>
-                        </div>
-                        {p.pricing.carriesMortgage && (
-                          <small>รวมจำนองติดไป</small>
-                        )}
-                        {p.pricing.warning && (
-                          <small className="inline-error">
-                            {p.pricing.warning}
-                          </small>
-                        )}
-                        <div className="card-status">
-                          <span>
-                            {p.parcels.some((v) => v.latitude !== null)
-                              ? "พบพิกัด"
-                              : "รอพิกัด / ตรวจสอบ"}
-                          </span>
-                          <span>
-                            {p.user.auctionStatus === "ended"
-                              ? "จบประมูลแล้ว"
-                              : p.user.auctionStatus === "auctioning"
-                                ? "อยู่ระหว่างประมูล"
-                                : "ยังไม่ระบุสถานะ"}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              {listVisible && !library.items.length && (
+              {!library.items.length && (
                 <div className="empty">
                   <Compass size={32} />
                   <h3>

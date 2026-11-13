@@ -14,16 +14,20 @@ test("evidence waits for a delayed property photo and flags broken images", asyn
         body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="green"/></svg>',
       });
     });
-    await page.setContent('<img src="https://fixture.invalid/photo.svg">', {
-      waitUntil: "domcontentloaded",
-    });
+    await page.setContent(
+      '<img alt="ภาพทรัพย์ที่จะขาย" src="https://fixture.invalid/photo.svg">',
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
     const result = await waitForEvidenceImages(
       page,
       new AbortController().signal,
-      { timeout: 3000, settle: 10 },
+      { timeout: 3000, settle: 10, requirePhoto: true },
     );
     assert.equal(result.ready, true);
     assert.equal(result.loaded, 1);
+    assert.deepEqual(result.photos, { total: 1, loaded: 1 });
     await page.route("https://fixture.invalid/broken.jpg", (route) =>
       route.abort(),
     );
@@ -38,6 +42,25 @@ test("evidence waits for a delayed property photo and flags broken images", asyn
     assert.equal(broken.ready, false);
     assert.equal(broken.total, 1);
     assert.equal(broken.loaded, 0);
+    await page.setContent(
+      '<img alt="โลโก้" src="https://fixture.invalid/photo.svg">',
+    );
+    const logoOnly = await waitForEvidenceImages(
+      page,
+      new AbortController().signal,
+      { timeout: 100, settle: 10, requirePhoto: true },
+    );
+    assert.equal(logoOnly.loaded, 1);
+    assert.deepEqual(logoOnly.photos, { total: 0, loaded: 0 });
+    assert.equal(logoOnly.ready, false);
+    await page.setContent('<img alt="รูปถ่ายทรัพย์">');
+    const photoWithoutSource = await waitForEvidenceImages(
+      page,
+      new AbortController().signal,
+      { timeout: 100, settle: 10, requirePhoto: true },
+    );
+    assert.deepEqual(photoWithoutSource.photos, { total: 1, loaded: 0 });
+    assert.equal(photoWithoutSource.ready, false);
   } finally {
     await browser.close();
   }
