@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { clean } from "./parsing.mjs";
+import { propertyPricing } from "./pricing.mjs";
 
 export const emptyUser = () => ({
   bookmarked: false,
@@ -169,6 +170,7 @@ export function filterProperties(items, f = {}) {
     throw Error("ค่าต่ำสุดต้องไม่เกินค่าสูงสุด");
   return items.filter((p) => {
     const u = p.user || emptyUser();
+    const price = (p.pricing || propertyPricing(p)).total;
     return (
       (!f.q ||
         clean(
@@ -188,8 +190,8 @@ export function filterProperties(items, f = {}) {
       (!f.province || p.province === f.province) &&
       (!f.district || p.district === f.district) &&
       (!f.type || p.propertyType === f.type) &&
-      (min === null || (p.price !== null && p.price >= min)) &&
-      (max === null || (p.price !== null && p.price <= max)) &&
+      (min === null || (price !== null && price >= min)) &&
+      (max === null || (price !== null && price <= max)) &&
       (areaMin === null ||
         (p.areaSqWa !== null && p.areaSqWa >= areaMin * 400)) &&
       (areaMax === null ||

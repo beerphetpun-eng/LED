@@ -44,6 +44,19 @@ export type Property = {
   saleLot: string;
   landDocument?: string;
   price: number | null;
+  pricing: {
+    appraisal: number | null;
+    carriesMortgage: boolean;
+    mortgageDebt: number | null;
+    total: number | null;
+    options: {
+      discount: number;
+      appraisal: number | null;
+      total: number | null;
+    }[];
+    warning: string | null;
+    mortgageClause: string | null;
+  };
   areaSqWa: number | null;
   areaText: string;
   auctionDates: string[];

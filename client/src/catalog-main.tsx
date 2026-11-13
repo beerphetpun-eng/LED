@@ -447,7 +447,7 @@ function App() {
             {field("ประเภททรัพย์", "type", library.facets.types)}
             <div className="range">
               <label>
-                ราคาต่ำสุด
+                ราคารวมต่ำสุด
                 <input
                   aria-label="ราคาต่ำสุด"
                   type="number"
@@ -458,7 +458,7 @@ function App() {
                 />
               </label>
               <label>
-                ราคาสูงสุด
+                ราคารวมสูงสุด
                 <input
                   aria-label="ราคาสูงสุด"
                   type="number"
@@ -580,7 +580,7 @@ function App() {
                     position={[v.latitude!, v.longitude!]}
                     icon={L.divIcon({
                       className: "price-marker",
-                      html: `<span>฿ ${money(p.price)}</span>`,
+                      html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
                       iconSize: [105, 35],
                       iconAnchor: [52, 35],
                     })}
@@ -649,8 +649,12 @@ function App() {
                   </small>
                   <div className="card-bottom">
                     <span>{p.areaText}</span>
-                    <strong>฿ {money(p.price)}</strong>
+                    <strong>฿ {money(p.pricing.total)}</strong>
                   </div>
+                  {p.pricing.carriesMortgage && <small>รวมจำนองติดไป</small>}
+                  {p.pricing.warning && (
+                    <small className="inline-error">{p.pricing.warning}</small>
+                  )}
                   <div className="card-status">
                     <span>
                       {p.parcels.some((v) => v.latitude !== null)
