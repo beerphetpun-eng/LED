@@ -41,6 +41,7 @@ function setup(
     fileReferenced: async () => false,
     completeFile: async () => {},
     allProperties: async () => [...records.values()],
+    getProperty: async (id) => records.get(id),
     upsertProperty: async (p, run) => records.set(p.id, p),
     updateSource: async (id, patch) =>
       records.set(id, { ...records.get(id), ...patch }),
@@ -126,6 +127,66 @@ test("scheduler processes all scopes without waiting for user input", async () =
   await t.service.tick();
   assert.equal(t.extracts, 2);
   assert.equal(t.service.running, false);
+});
+
+test("photo refresh targets incomplete components and only patches evidence", async () => {
+  const t = setup();
+  const old = {
+    id: "bundle",
+    province: "เชียงใหม่",
+    district: "อำเภอเมืองเชียงใหม่",
+    price: 100,
+    user: { comment: "keep" },
+    parcels: [{ deed: "1", latitude: 18.8 }],
+    error: "อ่านวันประมูลไม่ได้ · ภาพประกาศยังโหลดไม่ครบ (2/3 รูป)",
+    assetComponents: [
+      {
+        componentKey: "a",
+        screenshotUrl: "/evidence/a.png",
+        evidenceReady: true,
+        evidenceImages: { photos: { total: 1, loaded: 1 } },
+      },
+      {
+        componentKey: "b",
+        screenshotUrl: "/evidence/b.png",
+        evidenceReady: false,
+      },
+    ],
+  };
+  t.records.set(old.id, old);
+  t.options.source.prepareScope = async (scope) =>
+    assert.equal(scope.districtCode, "5001");
+  let release;
+  const wait = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.options.source.extract = async (job) => {
+    assert.equal(job.targetId, old.id);
+    assert.deepEqual([...job.targetKeys], ["b"]);
+    await wait;
+    job.properties = [
+      {
+        componentKey: "b",
+        price: 999,
+        evidenceReady: true,
+        screenshotUrl: "/evidence/new.png",
+      },
+    ];
+  };
+  const refreshing = t.service.refreshPhotos(old.id);
+  await assert.rejects(t.service.start(), /รีเฟรชรูป/);
+  release();
+  const result = await refreshing;
+  assert.equal(result.complete, true);
+  assert.equal(
+    result.property.assetComponents[1].screenshotUrl,
+    "/evidence/new.png",
+  );
+  assert.deepEqual(result.property.assetComponents[0], old.assetComponents[0]);
+  assert.deepEqual(result.property.parcels, old.parcels);
+  assert.deepEqual(result.property.user, old.user);
+  assert.equal(result.property.price, 100);
+  assert.equal(result.property.error, "อ่านวันประมูลไม่ได้");
 });
 test("daily quota pauses the parcel queue for 302 minutes and resumes after restart without duplicating source retrieval", async () => {
   let now = new Date("2026-11-12T12:00:00Z"),

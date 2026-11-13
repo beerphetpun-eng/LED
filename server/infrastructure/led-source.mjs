@@ -194,6 +194,7 @@ export function createLedSource(
         }
         const c = row.cells.map(clean),
           id = propertyId(c);
+        if (job.targetId && job.targetId !== id) continue;
         const p = {
           id,
           componentKey: componentKey(row.identity),
@@ -216,6 +217,7 @@ export function createLedSource(
           sourceRow: c,
           ...detailIdentity("", c),
         };
+        if (job.targetKeys && !job.targetKeys.has(p.componentKey)) continue;
         if (!meetsCriteria(p, job.values)) {
           job.excluded++;
           continue;
@@ -227,6 +229,7 @@ export function createLedSource(
           ) || (p.componentKey === "primary" ? root : null);
         if (
           existing?.rawText &&
+          !job.targetId &&
           existing.screenshotUrl &&
           existing.evidenceReady === true &&
           existing.evidenceVersion === evidenceVersion &&
@@ -347,6 +350,10 @@ export function createLedSource(
             await fallback.detail.close();
         }
         await saveJob(job);
+        if (job.targetKeys && job.properties.length === job.targetKeys.size) {
+          job.extractionComplete = true;
+          return job;
+        }
         await delay(800, undefined, { signal });
       }
       await saveJob(job);
