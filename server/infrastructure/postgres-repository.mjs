@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS land_radar.sync_seen(id text PRIMARY KEY, first_seen 
 CREATE TABLE IF NOT EXISTS land_radar.state(key text PRIMARY KEY, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS land_radar.file_gc(url text PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS land_radar.alerts(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), resolved boolean NOT NULL DEFAULT false);
+ALTER TABLE land_radar.alerts ADD COLUMN IF NOT EXISTS check_key text UNIQUE;
+ALTER TABLE land_radar.alerts ADD COLUMN IF NOT EXISTS retryable boolean NOT NULL DEFAULT false;
+ALTER TABLE land_radar.alerts ADD COLUMN IF NOT EXISTS retry_count integer;
+ALTER TABLE land_radar.alerts ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE land_radar.alerts ADD COLUMN IF NOT EXISTS recovered_at timestamptz;
 UPDATE land_radar.jobs SET data=jsonb_set(jsonb_set(data,'{status}','"interrupted"'),'{message}','"โปรแกรมปิดระหว่างทำงาน กรุณาเริ่มดึงใหม่ ข้อมูลที่บันทึกแล้วเปิดดูได้"') WHERE data->>'status' IN ('queued','searching','extracting','geocoding');`);
   await migratePricing();
 }
@@ -98,9 +103,64 @@ export async function alert(message) {
 export async function alerts() {
   return (
     await pool.query(
-      'SELECT id::text,message,created_at AS "createdAt" FROM land_radar.alerts WHERE resolved=false ORDER BY land_radar.alerts.id DESC',
+      `SELECT id::text,message,created_at AS "createdAt",
+        (retryable OR (check_key IS NULL AND message LIKE 'ทรัพย์ %ภาพประกาศยังโหลดไม่ครบ%')) AS retryable,
+        retry_count AS "retryCount",checked_at AS "checkedAt",recovered_at AS "recoveredAt"
+      FROM land_radar.alerts WHERE resolved=false
+        AND message NOT LIKE 'LandsMaps จำกัดจำนวนการค้นหา:%'
+        AND message NOT LIKE 'LandsMaps แจ้งเกินโควตา%'
+        AND message NOT LIKE 'LandsMaps ยังอยู่ในช่วงรอโควตา%'
+      ORDER BY recovered_at IS NOT NULL, COALESCE(checked_at,created_at) DESC,id DESC`,
     )
   ).rows;
+}
+export async function recordCheck({
+  key,
+  message,
+  retryable,
+  attempts,
+  legacyPrefix,
+  recoveryMessage = null,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: legacy } = await client.query(
+      `UPDATE land_radar.alerts SET resolved=true
+        WHERE check_key IS NULL AND NOT resolved AND left(message,length($1))=$1
+        RETURNING message`,
+      [legacyPrefix],
+    );
+    const failure = message?.slice(0, 2000) || null;
+    await client.query(
+      `INSERT INTO land_radar.alerts (check_key,message,retryable,retry_count,checked_at,recovered_at)
+       SELECT $1,COALESCE($2,$3,previous.message,$6),$4,
+         CASE WHEN $3::text IS NOT NULL THEN $5 ELSE GREATEST(0,$5-1) END,now(),
+         CASE WHEN $2::text IS NULL THEN now() END
+       FROM (SELECT (SELECT message FROM land_radar.alerts WHERE check_key=$1) AS message) previous
+       WHERE COALESCE($2,$3,previous.message,$6) IS NOT NULL
+       ON CONFLICT (check_key) DO UPDATE SET
+         message=EXCLUDED.message,retryable=EXCLUDED.retryable,checked_at=now(),
+         retry_count=CASE WHEN land_radar.alerts.recovered_at IS NULL
+           THEN COALESCE(land_radar.alerts.retry_count,0)+$5 ELSE EXCLUDED.retry_count END,
+         recovered_at=EXCLUDED.recovered_at,resolved=false
+       WHERE $2::text IS NOT NULL OR land_radar.alerts.recovered_at IS NULL`,
+      [
+        key,
+        failure,
+        legacy[0]?.message || null,
+        retryable,
+        attempts,
+        recoveryMessage,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 export async function resolveAlert(id) {
   await pool.query("UPDATE land_radar.alerts SET resolved=true WHERE id=$1", [

@@ -175,7 +175,7 @@ export function PropertyDetails({
                 await onSave(user);
                 setDirty(false);
               } catch {
-                // The shared error banner reports the failure; keep the draft.
+                // The notification menu reports the failure; keep the draft.
               } finally {
                 setSaving(false);
               }
@@ -283,9 +283,19 @@ export function PropertyDetails({
           <div className="parcel" key={v.deed}>
             <strong>โฉนด {v.deed}</strong>
             <p>
-              {v.latitude !== null
-                ? `${v.latitude}, ${v.longitude}`
-                : "ยังไม่พบพิกัด"}
+              {v.latitude !== null && v.longitude !== null ? (
+                <a
+                  className="text-link"
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${v.latitude},${v.longitude}`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="เปิดพิกัดนี้ใน Google Maps"
+                >
+                  {v.latitude}, {v.longitude} <ExternalLink size={13} />
+                </a>
+              ) : (
+                "ยังไม่พบพิกัด"
+              )}
             </p>
             <div className="evidence-pair">
               {[
@@ -331,7 +341,7 @@ export function PropertyDetails({
               try {
                 await onFacebook(days);
               } catch {
-                // The shared error banner reports the failure.
+                // The notification menu reports the failure.
               } finally {
                 setFbBusy(false);
               }

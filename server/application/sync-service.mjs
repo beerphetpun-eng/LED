@@ -39,12 +39,22 @@ export function createSyncService({
       const fingerprint = JSON.stringify(p);
       const key = p.id + "::" + (p.componentKey || "primary");
       if (job.saved.get(key) === fingerprint) continue;
-      await db.upsertProperty(p, state.runId, state.retention);
+      const stored = await db.upsertProperty(p, state.runId, state.retention);
       job.saved.set(key, fingerprint);
-      if (p.error)
-        await db.alert(
-          `ทรัพย์ ${p.assetSequence} คดี ${p.caseNumber}: ${p.error}`,
-        );
+      if (stored === null) continue;
+      const prefix = `ทรัพย์ ${p.assetSequence} คดี ${p.caseNumber}: `;
+      if (p.error || job.detailAttempts.has(key))
+        await db.recordCheck({
+          key: `led:${key}`,
+          message: p.error ? prefix + p.error : null,
+          retryable: p.status === "failed" || p.evidenceReady === false,
+          attempts: job.detailAttempts.get(key) || 0,
+          legacyPrefix: prefix,
+          recoveryMessage:
+            (job.detailAttempts.get(key) || 0) > 1
+              ? prefix + "เปิดประกาศหรือโหลดภาพไม่สำเร็จในการเปิดครั้งแรก"
+              : null,
+        });
     }
     await persist({
       message: job.message,
@@ -86,53 +96,64 @@ export function createSyncService({
         geoDone: index,
         geoTotal: records.length,
       });
-      const parcels = (p.parcels || []).filter(
+      const complete = (p.parcels || []).filter(
         (v) =>
           v.status === "located" &&
           v.mapEvidenceUrl &&
           v.backgroundReady !== false,
       );
+      let parcels = p.parcels || [];
       for (const deed of p.deed
         .split(", ")
-        .filter((d) => !parcels.some((v) => v.deed === d))) {
+        .filter((d) => !complete.some((v) => v.deed === d))) {
+        let parcel;
+        let attempts = 0;
         try {
           const component = p.assetComponents?.find((c) =>
             c.deed?.split(", ").includes(deed),
           );
           const record = component ? { ...component, id: p.id } : p;
           const key = cacheKey(record, deed);
-          const parcel =
-            cache.get(key) ||
-            (await geocoder.locate(record, deed, "catalog", signal));
+          parcel = cache.get(key);
+          if (!parcel) {
+            attempts++;
+            parcel = await geocoder.locate(record, deed, "catalog", signal);
+          }
           if (
             parcel.status === "located" &&
             parcel.mapEvidenceUrl &&
             parcel.backgroundReady !== false
           )
             cache.set(key, parcel);
-          parcels.push(parcel);
-          if (
-            parcel.status !== "located" ||
-            parcel.backgroundReady === false ||
-            !parcel.mapEvidenceUrl
-          )
-            await db.alert(
-              `โฉนด ${deed} ${p.district}: ${parcel.note || "หลักฐานพิกัดยังไม่ครบ"}`,
-            );
         } catch (e) {
           signal.throwIfAborted();
           if (e instanceof SourceUnavailableError) throw e;
-          await db.alert(
-            `LandsMaps · โฉนด ${deed}: ${e.message.split("\n")[0]}`,
-          );
-          parcels.push({
+          parcel = {
             deed,
             status: "lookup_failed",
             latitude: null,
             longitude: null,
             note: e.message.split("\n")[0],
-          });
+          };
         }
+        const prefix = `โฉนด ${deed} ${p.district}: `;
+        const ready =
+          parcel.status === "located" &&
+          parcel.mapEvidenceUrl &&
+          parcel.backgroundReady !== false;
+        await db.recordCheck({
+          key: `lands:${p.id}:${deed}`,
+          message: ready
+            ? null
+            : prefix + (parcel.note || "หลักฐานพิกัดยังไม่ครบ"),
+          retryable:
+            !ready &&
+            parcel.status !== "not_found" &&
+            !/ต้องตรวจสอบด้วยตนเอง/.test(parcel.note || ""),
+          attempts,
+          legacyPrefix: prefix,
+        });
+        parcels = [...parcels.filter((v) => v.deed !== deed), parcel];
         await db.updateSource(p.id, {
           parcels,
           status:
@@ -183,6 +204,7 @@ export function createSyncService({
           properties: [],
           warnings: [],
           saved: new Map(),
+          detailAttempts: new Map(),
           extractionComplete: false,
         };
         await source.extract(job, signal, collect);
@@ -214,10 +236,15 @@ export function createSyncService({
     } catch (e) {
       const cancelled = signal.aborted;
       const limited = e instanceof SourceRateLimitError;
-      if (!cancelled) await db.alert(e.message.split("\n")[0]);
+      if (!cancelled && !limited) await db.alert(e.message.split("\n")[0]);
       await persist({
         status: cancelled ? "cancelled" : limited ? "waiting_limit" : "partial",
-        ...(limited ? { lastQuotaAt: clock().toISOString() } : {}),
+        ...(limited
+          ? {
+              lastQuotaAt: clock().toISOString(),
+              quotaMessage: e.message.split("\n")[0],
+            }
+          : {}),
         ...(cancelled
           ? { geoRetryAt: null }
           : limited || state.geoRetryAt
