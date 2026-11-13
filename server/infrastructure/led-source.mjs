@@ -139,7 +139,7 @@ export async function readRows(page) {
 
 export function createLedSource(
   browser,
-  { findExisting = async () => null } = {},
+  { findExisting = async () => null, checkImages = waitForEvidenceImages } = {},
 ) {
   async function extract(job, signal, onChange) {
     const put = (p) => {
@@ -254,20 +254,41 @@ export function createLedSource(
           "extracting",
           `หน้า ${job.pages} · อ่านรายการ ${job.seen} · ${p.subdistrict} ${p.district}`,
         );
-        let detail;
+        let detail, fallback;
+        let raw, evidence;
         try {
-          detail = await openDetail(page, index);
-          await detail.waitForLoadState("domcontentloaded");
-          await detail
-            .getByText("รายการทรัพย์ที่จะขาย", { exact: true })
-            .waitFor({ timeout: 30000 });
-          const raw = await detail.innerText("body");
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            signal.throwIfAborted();
+            job.detailAttempts?.set(`${id}::${p.componentKey}`, attempt);
+            try {
+              detail = await openDetail(page, index);
+              await detail.waitForLoadState("domcontentloaded");
+              await detail
+                .getByText("รายการทรัพย์ที่จะขาย", { exact: true })
+                .waitFor({ timeout: 30000 });
+              raw = await detail.innerText("body");
+              evidence = await checkImages(detail, signal);
+              if (evidence.ready || attempt === 2) break;
+              fallback = { detail, raw, evidence };
+              detail = null;
+            } catch (e) {
+              signal.throwIfAborted();
+              if (fallback) {
+                await detail?.close();
+                ({ detail, raw, evidence } = fallback);
+                break;
+              }
+              if (attempt === 2 || e.name !== "TimeoutError") throw e;
+            }
+            await detail?.close();
+            detail = null;
+            await delay(1500, undefined, { signal });
+          }
           p.rawText = raw;
           Object.assign(p, detailIdentity(raw, c));
           p.landDocument = landDocument(raw);
           p.sourceUrl = detail.url();
           p.sourceTitle = await detail.title();
-          const evidence = await waitForEvidenceImages(detail, signal);
           p.evidenceReady = evidence.ready;
           p.evidenceImages = evidence;
           p.evidenceVersion = 2;
@@ -293,12 +314,15 @@ export function createLedSource(
               .join(" · ");
           }
         } catch (e) {
+          signal.throwIfAborted();
           await browser.diagnostic?.(page, job.id, e);
           p.status = "failed";
           p.error =
             "อ่านรายละเอียดไม่สำเร็จ: " + String(e.message).split("\n")[0];
         } finally {
           await detail?.close();
+          if (fallback && fallback.detail !== detail)
+            await fallback.detail.close();
         }
         await saveJob(job);
         await delay(800, undefined, { signal });

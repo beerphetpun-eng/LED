@@ -30,6 +30,9 @@ function setup(
       states[k] = structuredClone(d);
     },
     alert: async (m) => messages.push(m),
+    recordCheck: async (check) => {
+      if (check.message) messages.push(check.message);
+    },
     expireProperties: async () => {
       cleanups++;
       return 0;

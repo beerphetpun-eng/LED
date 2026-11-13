@@ -8,6 +8,76 @@ import {
   openDetail,
 } from "../server/infrastructure/led-source.mjs";
 import { propertyId } from "../server/domain/catalog.mjs";
+test("incomplete evidence reopens the announcement once and saves the recovered capture", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    let opens = 0;
+    await context.route("http://fixture.test/asset_open.asp", (route) => {
+      opens++;
+      return route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body: `<h1>รายการทรัพย์ที่จะขาย</h1><p>โฉนดเลขที่ 12345</p><p>01/01/2570</p><p>capture ${opens}</p>`,
+      });
+    });
+    const page = await context.newPage();
+    const cells = [
+      "ชม7/2569",
+      "1 - 1",
+      "คดี1/2568",
+      "ที่ดิน",
+      "2",
+      "0",
+      "0",
+      "1000000",
+      "สุเทพ",
+      "เมืองเชียงใหม่",
+      "เชียงใหม่",
+    ];
+    await page.setContent(
+      `<p>พบ 1 รายการ</p><table><tr>${cells.map((c, i) => `<td>${i === 0 ? '<form action="http://fixture.test/asset_open.asp" method="post" target="_blank"></form>' : ""}${c}</td>`).join("")}</tr></table>`,
+    );
+    const captures = [];
+    const source = createLedSource(
+      {
+        led: page,
+        verificationCode: async () => "123456",
+        submit: async () => {},
+        screenshot: async (detail) => {
+          captures.push(await detail.innerText("body"));
+          return "/evidence/recovered.png";
+        },
+      },
+      {
+        checkImages: async () => ({
+          ready: opens === 2,
+          total: 1,
+          loaded: opens - 1,
+        }),
+      },
+    );
+    const job = {
+      id: "fixture",
+      values: {},
+      pages: 0,
+      seen: 0,
+      skippedRed: 0,
+      excluded: 0,
+      properties: [],
+      warnings: [],
+      detailAttempts: new Map(),
+    };
+    await source.extract(job, new AbortController().signal, async () => {});
+    assert.equal(opens, 2);
+    assert.equal(job.detailAttempts.get(`${propertyId(cells)}::primary`), 2);
+    assert.equal(job.properties[0].evidenceReady, true);
+    assert.equal(captures.length, 1);
+    assert.match(captures[0], /capture 2/);
+    assert.equal(context.pages().length, 1);
+  } finally {
+    await browser.close();
+  }
+});
 test("asset and pagination forms work without legacy inline click handlers", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

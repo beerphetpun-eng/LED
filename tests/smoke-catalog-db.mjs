@@ -115,10 +115,33 @@ try {
       await db.queryProperties({ minPrice: "640442.67", maxPrice: "640442.67" })
     ).items.some((p) => p.id === id),
   );
+  const check = {
+    key: `smoke:${id}`,
+    legacyPrefix: `fixture:${id}: `,
+    message: `fixture:${id}: incomplete`,
+    retryable: true,
+    attempts: 2,
+  };
+  const findAlert = async () =>
+    (await db.alerts()).find((a) => a.message === check.message);
+  await db.recordCheck(check);
+  assert.equal((await findAlert()).retryCount, 1);
+  await db.recordCheck({ ...check, attempts: 1, message: null });
+  assert.equal((await findAlert()).retryCount, 2);
+  assert.ok((await findAlert()).recoveredAt);
+  await db.resolveAlert((await findAlert()).id);
+  await db.recordCheck({ ...check, attempts: 0, message: null });
+  assert.equal(await findAlert(), undefined);
+  await db.recordCheck({ ...check, attempts: 1 });
+  assert.equal((await findAlert()).retryCount, 0);
+  assert.equal((await findAlert()).recoveredAt, null);
   console.log(
     "PostgreSQL upsert, bundled assets, run counting and user annotations verified.",
   );
 } finally {
+  await db.pool.query("DELETE FROM land_radar.alerts WHERE check_key=$1", [
+    `smoke:${id}`,
+  ]);
   await db.pool.query("DELETE FROM land_radar.properties WHERE id=$1", [id]);
   await db.pool.query("DELETE FROM land_radar.sync_seen WHERE id=$1", [id]);
   await db.close();

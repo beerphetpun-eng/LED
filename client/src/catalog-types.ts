@@ -93,6 +93,7 @@ export type Runtime = {
   skippedExisting?: number;
   nextRunAt?: string;
   geoRetryAt?: string | null;
+  quotaMessage?: string;
   scopeIndex?: number;
   scopeCount?: number;
   geoDone?: number;
@@ -101,8 +102,17 @@ export type Runtime = {
 export type SyncResponse = {
   settings: Settings;
   runtime: Runtime;
-  alerts: { id: string; message: string; createdAt: string }[];
+  alerts: SyncAlert[];
   lastCleanup?: { at: string; deleted: number };
+};
+export type SyncAlert = {
+  id: string;
+  message: string;
+  createdAt: string;
+  retryable: boolean;
+  retryCount: number | null;
+  checkedAt: string | null;
+  recoveredAt: string | null;
 };
 export type Filters = Record<string, string>;
 export type Library = {

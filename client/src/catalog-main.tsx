@@ -14,7 +14,8 @@ import {
   X,
   Search,
   Database,
-  AlertCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
   ArrowDownToLine,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import type {
 import { api, money, time } from "./catalog-api";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
+import { AlertMenu } from "./AlertMenu";
 import "leaflet/dist/leaflet.css";
 import "./catalog.css";
 const emptyLibrary: Library = {
@@ -53,6 +55,11 @@ function ViewMap({
   );
   const key = JSON.stringify(coordinates);
   useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
+  }, [map]);
+  useEffect(() => {
     map.invalidateSize();
     if (coordinates.length && !selected)
       map.fitBounds(L.latLngBounds(coordinates), {
@@ -76,6 +83,7 @@ function App() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
     [full, setFull] = useState(false),
+    [filtersCollapsed, setFiltersCollapsed] = useState(false),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
     [filters, setFilters] = useState<Filters>(() => {
@@ -279,121 +287,100 @@ function App() {
             <SettingsIcon size={16} />
             ตั้งค่าซิงค์
           </button>
+          <AlertMenu
+            alerts={sync?.alerts || []}
+            error={error}
+            onClearError={() => setError("")}
+            onDismiss={(id) =>
+              act("รับทราบ", async () => {
+                await api(`/alerts/${id}/resolve`, "POST");
+                await loadSync();
+              })
+            }
+          />
         </nav>
         <span className="db-badge">
           <Database size={14} />
           {sync ? "PostgreSQL · ในเครื่อง" : "กำลังเชื่อมต่อ"}
         </span>
       </header>
-      <div className="global-alerts" aria-live="polite">
-        {error && (
-          <div className="alert error" role="alert">
-            <AlertCircle size={18} />
-            <span>{error}</span>
-            <button aria-label="ปิดข้อผิดพลาด" onClick={() => setError("")}>
-              <X size={16} />
-            </button>
-          </div>
-        )}
-        {sync && sync.alerts.length > 0 && (
-          <details className="alert-list" open>
-            <summary>
-              มีข้อผิดพลาด / รายการที่ต้องตรวจสอบ {sync.alerts.length} ข้อ
-            </summary>
-            <div className="alert-rows">
-              {sync.alerts.map((a) => (
-                <div key={a.id}>
-                  <span>{a.message}</span>
+      {tab === "sync" ? (
+        <main className="sync-page">
+          <section className="sync-strip">
+            <div>
+              <span
+                className={
+                  sync?.runtime.running ? "status-dot pulsing" : "status-dot"
+                }
+              />
+              <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
+              <small>
+                {sync?.runtime.running
+                  ? sync.runtime.status === "geocoding"
+                    ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
+                    : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
+                  : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
+              </small>
+              {sync?.runtime.geoRetryAt && (
+                <small>
+                  {sync.runtime.status !== "waiting_limit" &&
+                    sync.runtime.quotaMessage &&
+                    `${sync.runtime.quotaMessage} · `}
+                  {sync.settings.enabled
+                    ? "ค้นพิกัดต่ออัตโนมัติ"
+                    : "ครบเวลารอโควตา"}{" "}
+                  {time(sync.runtime.geoRetryAt)}
+                </small>
+              )}
+            </div>
+            <div className="sync-actions">
+              {sync?.runtime.running ? (
+                <button
+                  onClick={() =>
+                    act("กำลังหยุด", async () => {
+                      await api("/sync/cancel", "POST");
+                      await loadSync();
+                    })
+                  }
+                >
+                  หยุดซิงค์
+                </button>
+              ) : (
+                <>
                   <button
+                    disabled={!!busy || !sync}
                     onClick={() =>
-                      act("รับทราบ", async () => {
-                        await api("/alerts/" + a.id + "/resolve", "POST");
+                      act("เริ่มซิงค์", async () => {
+                        await api("/sync/start", "POST");
                         await loadSync();
                       })
                     }
                   >
-                    รับทราบ
+                    <RefreshCw size={15} />
+                    ซิงค์ด้วยตนเอง
                   </button>
-                </div>
-              ))}
+                  <button
+                    disabled={
+                      !!busy ||
+                      !library.total ||
+                      !!(
+                        sync?.runtime.geoRetryAt &&
+                        Date.parse(sync.runtime.geoRetryAt) > Date.now()
+                      )
+                    }
+                    onClick={() =>
+                      act("ค้นพิกัด", async () => {
+                        await api("/sync/geocode", "POST");
+                        await loadSync();
+                      })
+                    }
+                  >
+                    ค้นพิกัดที่ยังขาด
+                  </button>
+                </>
+              )}
             </div>
-          </details>
-        )}
-      </div>
-      <section className="sync-strip">
-        <div>
-          <span
-            className={
-              sync?.runtime.running ? "status-dot pulsing" : "status-dot"
-            }
-          />
-          <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
-          <small>
-            {sync?.runtime.running
-              ? sync.runtime.status === "geocoding"
-                ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
-                : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
-              : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
-          </small>
-          {sync?.runtime.geoRetryAt && (
-            <small>
-              {sync.settings.enabled
-                ? "ค้นพิกัดต่ออัตโนมัติ"
-                : "ครบเวลารอโควตา"}{" "}
-              {time(sync.runtime.geoRetryAt)}
-            </small>
-          )}
-        </div>
-        <div className="sync-actions">
-          {sync?.runtime.running ? (
-            <button
-              onClick={() =>
-                act("กำลังหยุด", async () => {
-                  await api("/sync/cancel", "POST");
-                  await loadSync();
-                })
-              }
-            >
-              หยุดซิงค์
-            </button>
-          ) : (
-            <>
-              <button
-                disabled={!!busy || !sync}
-                onClick={() =>
-                  act("เริ่มซิงค์", async () => {
-                    await api("/sync/start", "POST");
-                    await loadSync();
-                  })
-                }
-              >
-                <RefreshCw size={15} />
-                ซิงค์ด้วยตนเอง
-              </button>
-              <button
-                disabled={
-                  !!busy ||
-                  !library.total ||
-                  !!(
-                    sync?.runtime.geoRetryAt &&
-                    Date.parse(sync.runtime.geoRetryAt) > Date.now()
-                  )
-                }
-                onClick={() =>
-                  act("ค้นพิกัด", async () => {
-                    await api("/sync/geocode", "POST");
-                    await loadSync();
-                  })
-                }
-              >
-                ค้นพิกัดที่ยังขาด
-              </button>
-            </>
-          )}
-        </div>
-      </section>
-      {tab === "sync" ? (
-        <main className="sync-page">
+          </section>
           {sync && geography.length > 0 ? (
             <SyncPanel
               provinces={geography}
@@ -417,9 +404,39 @@ function App() {
           </p>
         </main>
       ) : (
-        <main className="explorer">
-          <aside className="filters">
-            <span className="eyebrow">YOUR PROPERTY LIBRARY</span>
+        <main
+          className={`explorer${filtersCollapsed ? " filters-collapsed" : ""}`}
+        >
+          {filtersCollapsed && (
+            <aside className="filter-rail">
+              <button
+                aria-label="เปิดแถบตัวกรอง"
+                title="เปิดแถบตัวกรอง"
+                aria-expanded={false}
+                aria-controls="library-filters"
+                onClick={() => setFiltersCollapsed(false)}
+              >
+                <PanelLeftOpen size={18} />
+              </button>
+            </aside>
+          )}
+          <aside
+            className="filters"
+            id="library-filters"
+            hidden={filtersCollapsed}
+          >
+            <div className="filter-heading">
+              <span className="eyebrow">YOUR PROPERTY LIBRARY</span>
+              <button
+                aria-label="ซ่อนแถบตัวกรอง"
+                title="ซ่อนแถบตัวกรอง"
+                aria-expanded={true}
+                aria-controls="library-filters"
+                onClick={() => setFiltersCollapsed(true)}
+              >
+                <PanelLeftClose size={18} />
+              </button>
+            </div>
             <h1>
               ทุกทรัพย์ที่ติดตาม
               <br />
