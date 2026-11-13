@@ -41,7 +41,37 @@ try {
     ).rows[0].n,
     1,
   );
-  console.log("PostgreSQL upsert, run counting and user annotations verified.");
+  const component = {
+    ...property,
+    price: 300,
+    componentKey: "room-one",
+    rawText: "fixture",
+    screenshotUrl: "/evidence/db-smoke-one.png",
+    evidenceReady: true,
+    areaSqWa: 10,
+  };
+  await db.upsertProperty(component, "second", "engaged");
+  await db.upsertProperty(
+    {
+      ...component,
+      componentKey: "room-two",
+      screenshotUrl: "/evidence/db-smoke-two.png",
+      areaSqWa: 20,
+    },
+    "second",
+    "engaged",
+  );
+  await db.upsertProperty(component, "second", "engaged");
+  const bundle = await db.getProperty(id);
+  assert.equal(bundle.assetComponents.length, 2);
+  assert.equal(bundle.areaSqWa, 30);
+  assert.equal(bundle.price, 300);
+  assert.equal(bundle.syncCount, 2);
+  assert.equal(bundle.user.comment, "verification");
+  assert.equal(await db.fileReferenced("/evidence/db-smoke-two.png"), true);
+  console.log(
+    "PostgreSQL upsert, bundled assets, run counting and user annotations verified.",
+  );
 } finally {
   await db.pool.query("DELETE FROM land_radar.properties WHERE id=$1", [id]);
   await db.pool.query("DELETE FROM land_radar.sync_seen WHERE id=$1", [id]);

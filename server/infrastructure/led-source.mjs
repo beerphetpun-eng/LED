@@ -2,6 +2,7 @@ import { propertyId, detailIdentity } from "../domain/catalog.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { LED } from "./browser-service.mjs";
 import { waitForEvidenceImages } from "./evidence-images.mjs";
+import { componentKey } from "../domain/asset-components.mjs";
 import {
   clean,
   number,
@@ -15,20 +16,67 @@ import {
 // containing their own form are records; enclosing layout rows are not.
 const rowSelector =
   'tr:has(form[action*="asset_open"]):not(:has(tr form[action*="asset_open"]))';
+export async function waitForResultTable(page) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 45000 });
+  await page.waitForFunction(
+    (selector) => {
+      const rows = [...document.querySelectorAll(selector)];
+      return (
+        document.readyState !== "loading" &&
+        rows.length > 0 &&
+        rows.every(
+          (r) =>
+            [...r.querySelectorAll("td,th")].filter(
+              (c) => c.closest("tr") === r,
+            ).length === 11,
+        )
+      );
+    },
+    rowSelector,
+    { timeout: 20000 },
+  );
+  let previous = "";
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const current = await page.locator(rowSelector).allTextContents();
+    const fingerprint = JSON.stringify(current);
+    if (fingerprint === previous) return;
+    previous = fingerprint;
+    await delay(350);
+  }
+  throw Error("ตารางผลค้นหายังเปลี่ยนแปลงอยู่ กรุณาลองใหม่");
+}
 export async function advancePage(page) {
   const next = page.locator('a[title="ถัดไป"]').first();
   if (!(await next.count())) return false;
-  const before = await page.locator(rowSelector).first().innerText();
+  const before = await page.evaluate(
+    (selector) => ({
+      page:
+        document.body.innerText.match(/หน้าที่\s*\d+\s*\/\s*\d+/)?.[0] || null,
+      rows: [...document.querySelectorAll(selector)]
+        .map((r) => r.innerText)
+        .join("\n"),
+    }),
+    rowSelector,
+  );
   await next.click();
   // Pagination may update the current document without a navigation event.
   await page.waitForFunction(
     ({ selector, before }) => {
-      const row = document.querySelector(selector);
-      return row && row.innerText !== before;
+      const rows = [...document.querySelectorAll(selector)];
+      const currentPage = document.body?.innerText.match(
+        /หน้าที่\s*\d+\s*\/\s*\d+/,
+      )?.[0];
+      return (
+        rows.length > 0 &&
+        (before.page
+          ? !!currentPage && currentPage !== before.page
+          : rows.map((r) => r.innerText).join("\n") !== before.rows)
+      );
     },
     { selector: rowSelector, before },
     { timeout: 45000 },
   );
+  await waitForResultTable(page);
   return true;
 }
 export async function readRows(page) {
@@ -50,7 +98,20 @@ export async function readRows(page) {
           const s = getComputedStyle(e);
           return redColor(s.backgroundColor) || redColor(s.color);
         });
-      return { cells: Array.from(r.cells).map((c) => c.innerText.trim()), red };
+      const form = r.querySelector('form[action*="asset_open"]');
+      const field = (name) =>
+        form?.querySelector(`[name="${name}"]`)?.value || "";
+      return {
+        cells: [...r.querySelectorAll("td,th")]
+          .filter((c) => c.closest("tr") === r)
+          .map((c) => c.innerText.trim()),
+        red,
+        identity: {
+          sourceAssetId: field("auc_asset_gen"),
+          address: field("addrno"),
+          documentDeed: field("deedno"),
+        },
+      };
     }),
   );
 }
@@ -59,14 +120,21 @@ export function createLedSource(
   browser,
   { findExisting = async () => null } = {},
 ) {
-  async function extract(job, captcha, signal, onChange) {
+  async function extract(job, signal, onChange) {
+    const put = (p) => {
+      const index = job.properties.findIndex(
+        (v) => v.id === p.id && v.componentKey === p.componentKey,
+      );
+      if (index < 0) job.properties.push(p);
+      else job.properties[index] = p;
+    };
     const saveJob = onChange;
     const progress = async (j, status, message) => {
       Object.assign(j, { status, message });
       await onChange(j);
     };
     await progress(job, "searching", "กำลังค้นหาจากกรมบังคับคดี");
-    await browser.submit(captcha);
+    await browser.submit(await browser.verificationCode());
     const page = browser.led,
       seenPages = new Set();
     const expected = number(
@@ -107,6 +175,8 @@ export function createLedSource(
           id = propertyId(c);
         const p = {
           id,
+          componentKey: componentKey(row.identity),
+          ...row.identity,
           title: `${c[3]} · ${c[8]}`,
           propertyType: c[3],
           province: c[10],
@@ -129,7 +199,11 @@ export function createLedSource(
           job.excluded++;
           continue;
         }
-        const existing = await findExisting(id);
+        const root = await findExisting(id);
+        const existing =
+          root?.assetComponents?.find(
+            (c) => c.componentKey === p.componentKey,
+          ) || (p.componentKey === "primary" ? root : null);
         if (
           existing?.rawText &&
           existing.screenshotUrl &&
@@ -139,8 +213,9 @@ export function createLedSource(
         ) {
           const { user, firstSeen, lastSeen, syncCount, ...previous } =
             existing;
-          job.properties.push({
+          put({
             ...previous,
+            componentKey: p.componentKey,
             ...propertyArea(c),
             retrievedAt: new Date().toISOString(),
           });
@@ -152,7 +227,7 @@ export function createLedSource(
           );
           continue;
         }
-        job.properties.push(p);
+        put(p);
         await progress(
           job,
           "extracting",
@@ -200,6 +275,7 @@ export function createLedSource(
               .join(" · ");
           }
         } catch (e) {
+          await browser.diagnostic?.(page, job.id, e);
           p.status = "failed";
           p.error =
             "อ่านรายละเอียดไม่สำเร็จ: " + String(e.message).split("\n")[0];
@@ -210,7 +286,12 @@ export function createLedSource(
         await delay(800, undefined, { signal });
       }
       await saveJob(job);
-      if (!(await advancePage(page))) break;
+      try {
+        if (!(await advancePage(page))) break;
+      } catch (e) {
+        await browser.diagnostic?.(page, job.id, e);
+        throw e;
+      }
     }
     if (expected !== null && expected !== job.seen)
       job.warnings.push(
@@ -233,7 +314,7 @@ export function createLedSource(
         tambonSelect: "",
       });
       await browser.apply(values);
-      return { captchaUrl: "/api/captcha?t=" + Date.now() };
+      return { verificationMode: "visible_text" };
     },
     extract,
   };

@@ -50,13 +50,6 @@ export function createCatalogHttp({
     sync.cancel();
     res.json({ ok: true });
   });
-  app.post("/api/sync/captcha", (req, res) => {
-    sync.submitCaptcha(req.body.code);
-    res.json({ ok: true });
-  });
-  app.get("/api/captcha", (req, res) =>
-    res.sendFile(path.join(evidencePath, "captcha.png")),
-  );
   app.post("/api/alerts/:alertId/resolve", async (req, res) => {
     if (!/^\d+$/.test(req.params.alertId)) throw Error("ID ไม่ถูกต้อง");
     await db.resolveAlert(req.params.alertId);

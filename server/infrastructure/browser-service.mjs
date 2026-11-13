@@ -87,12 +87,8 @@ export class BrowserService {
           };
         }),
     );
-    await p
-      .locator("#sesskey")
-      .screenshot({ path: path.join(evidencePath, "captcha.png") });
     return {
       fields,
-      captchaUrl: "/api/captcha?t=" + Date.now(),
       refreshedAt: this.refreshedAt,
     };
   }
@@ -162,6 +158,15 @@ export class BrowserService {
         .fill(whole < 1 ? "" : String(whole - 1));
     }
   }
+  async verificationCode() {
+    const shown = this.led.locator("#sesskey");
+    if (!(await shown.isVisible()))
+      throw Error("ต้นทางไม่แสดงรหัสยืนยันแบบข้อความ กรุณาตรวจตัวเชื่อมต่อ");
+    const code = (await shown.innerText()).trim();
+    if (!/^\d{6}$/.test(code))
+      throw Error("รูปแบบรหัสยืนยันต้นทางเปลี่ยน ไม่สามารถซิงค์อัตโนมัติได้");
+    return code;
+  }
   async submit(captcha) {
     this.lastDialog = null;
     await this.led.locator("#pass").fill(captcha);
@@ -180,7 +185,7 @@ export class BrowserService {
     } catch {
       throw Error(
         this.lastDialog ||
-          "เว็บต้นทางไม่แสดงผลค้นหา กรุณารีเฟรชรหัสยืนยันแล้วลองอีกครั้ง",
+          "เว็บต้นทางไม่แสดงผลค้นหา กรุณากดซิงค์ใหม่เพื่อให้ระบบอ่านรหัสยืนยันชุดใหม่",
       );
     }
   }
@@ -220,11 +225,25 @@ export class BrowserService {
     });
     return "/evidence/" + name + ".png";
   }
-  async diagnostic(page, runId) {
+  async diagnostic(page, runId, error) {
     const name = "diagnostic-" + String(runId).replace(/[^a-zA-Z0-9_-]/g, "");
     await writeFile(
       path.join(root, "data", name + ".html"),
       await page.content(),
+    );
+    await writeFile(
+      path.join(root, "data", name + ".json"),
+      JSON.stringify({
+        url: page.url(),
+        error: error?.stack || String(error || ""),
+        rows: await page
+          .locator(
+            'tr:has(form[action*="asset_open"]):not(:has(tr form[action*="asset_open"]))',
+          )
+          .evaluateAll((rows) =>
+            rows.map((r) => ({ cells: r.cells.length, html: r.outerHTML })),
+          ),
+      }),
     );
   }
   async close() {

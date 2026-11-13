@@ -75,7 +75,6 @@ function App() {
     [tab, setTab] = useState("explore"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
-    [captcha, setCaptcha] = useState(""),
     [full, setFull] = useState(false),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
@@ -319,42 +318,6 @@ function App() {
               ))}
             </div>
           </details>
-        )}
-        {sync?.runtime.status === "waiting_captcha" && (
-          <form
-            className="captcha-bar"
-            onSubmit={(e) => {
-              e.preventDefault();
-              act("ส่งรหัส", async () => {
-                await api("/sync/captcha", "POST", { code: captcha });
-                setCaptcha("");
-                await loadSync();
-              });
-            }}
-          >
-            <div>
-              <strong>ซิงค์รอรหัสยืนยัน</strong>
-              <span>{sync.runtime.message}</span>
-            </div>
-            <img
-              src={sync.runtime.captchaUrl}
-              alt="รหัสยืนยันจากกรมบังคับคดี"
-            />
-            <input
-              aria-label="รหัสยืนยัน"
-              placeholder="รหัส 6 หลัก"
-              inputMode="numeric"
-              maxLength={6}
-              value={captcha}
-              onChange={(e) => setCaptcha(e.target.value.replace(/\D/g, ""))}
-            />
-            <button
-              className="primary"
-              disabled={captcha.length !== 6 || !!busy}
-            >
-              ยืนยันและซิงค์ต่อ
-            </button>
-          </form>
         )}
       </div>
       <section className="sync-strip">
@@ -699,7 +662,7 @@ function App() {
                 <p>
                   {library.total
                     ? "ลองปรับราคา พื้นที่ หรือดาวที่เลือก"
-                    : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กรอกรหัสยืนยันด้านบนเพื่อเริ่มดึงข้อมูล"}
+                    : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กดซิงค์เพื่อเริ่มดึงข้อมูล"}
                 </p>
               </div>
             )}

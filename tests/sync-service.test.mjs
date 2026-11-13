@@ -7,7 +7,7 @@ const settings = {
   retention: "manual",
   scopes: [{ provinceCode: "50", districtCodes: ["5001", "5002"] }],
 };
-function setup(fail = false) {
+function setup(fail = false, hang = false) {
   let saved = structuredClone(settings);
   const states = {},
     records = new Map(),
@@ -36,10 +36,13 @@ function setup(fail = false) {
     updateSource: async () => {},
   };
   const source = {
-    prepareScope: async () => ({ captchaUrl: "/api/captcha" }),
-    extract: async (j, c, s, save) => {
+    prepareScope: async () => ({}),
+    extract: async (j, s, save) => {
       extracts++;
-      assert.equal(c, "123456");
+      if (hang)
+        await new Promise((resolve, reject) =>
+          s.addEventListener("abort", () => reject(s.reason), { once: true }),
+        );
       if (fail) throw Error("source changed");
       j.properties = [
         {
@@ -96,23 +99,11 @@ async function waitFor(s, status) {
   }
   throw Error("did not enter " + status);
 }
-test("scheduler waits visibly for a human code and serializes multiple scopes", async () => {
+
+test("scheduler processes all scopes without waiting for user input", async () => {
   const t = setup();
   await t.service.init();
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
-  assert.equal(t.extracts, 0);
-  const cleanupCount = t.cleanups;
-  await t.service.tick();
-  assert.ok(t.cleanups > cleanupCount);
-  assert.equal(t.service.status().status, "waiting_captcha");
-  await assert.rejects(t.service.start(), /กำลัง/);
-  assert.throws(() => t.service.submitCaptcha("bad"));
-  t.service.submitCaptcha("123456");
-  for (let i = 0; i < 100 && t.extracts === 0; i++)
-    await new Promise((r) => setTimeout(r, 2));
-  await waitFor(t.service, "waiting_captcha");
-  t.service.submitCaptcha("123456");
   await t.service.task;
   assert.equal(t.extracts, 2);
   assert.equal(t.records.size, 1);
@@ -123,20 +114,18 @@ test("scheduler waits visibly for a human code and serializes multiple scopes", 
   assert.equal(t.extracts, 2);
   assert.equal(t.service.running, false);
 });
-test("cancel while waiting releases the queue without submitting a search", async () => {
-  const t = setup();
+test("cancellation releases an automatic sync and prevents overlapping runs", async () => {
+  const t = setup(false, true);
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
+  await waitFor(t.service, "extracting");
+  await assert.rejects(t.service.start(), /กำลัง/);
   t.service.cancel();
   await t.service.task;
-  assert.equal(t.extracts, 0);
   assert.equal(t.service.status().status, "cancelled");
 });
 test("source errors persist an alert and incomplete status", async () => {
   const t = setup(true);
   await t.service.start();
-  await waitFor(t.service, "waiting_captcha");
-  t.service.submitCaptcha("123456");
   await t.service.task;
   assert.equal(t.service.status().status, "partial");
   assert.deepEqual(t.messages, ["source changed"]);

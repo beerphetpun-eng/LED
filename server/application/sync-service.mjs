@@ -13,7 +13,6 @@ export function createSyncService({
   let state = { status: "idle", message: "พร้อมซิงค์", nextRunAt: null },
     running = false,
     controller,
-    answer,
     timer,
     ticking = false;
   const persist = async (patch) => {
@@ -35,9 +34,10 @@ export function createSyncService({
     for (const p of job.properties) {
       if (!p.rawText && p.status !== "failed") continue;
       const fingerprint = JSON.stringify(p);
-      if (job.saved.get(p.id) === fingerprint) continue;
+      const key = p.id + "::" + (p.componentKey || "primary");
+      if (job.saved.get(key) === fingerprint) continue;
       await db.upsertProperty(p, state.runId, state.retention);
-      job.saved.set(p.id, fingerprint);
+      job.saved.set(key, fingerprint);
       if (p.error)
         await db.alert(
           `ทรัพย์ ${p.assetSequence} คดี ${p.caseNumber}: ${p.error}`,
@@ -83,7 +83,15 @@ export function createSyncService({
         .split(", ")
         .filter((d) => !parcels.some((v) => v.deed === d))) {
         try {
-          const parcel = await geocoder.locate(p, deed, "catalog", signal);
+          const component = p.assetComponents?.find((c) =>
+            c.deed?.split(", ").includes(deed),
+          );
+          const parcel = await geocoder.locate(
+            component ? { ...component, id: p.id } : p,
+            deed,
+            "catalog",
+            signal,
+          );
           parcels.push(parcel);
           if (
             parcel.status !== "located" ||
@@ -132,26 +140,8 @@ export function createSyncService({
           scope,
           scopeIndex: index + 1,
         });
-        const challenge = await source.prepareScope(scope);
+        await source.prepareScope(scope);
         signal.throwIfAborted();
-        const captchaPromise = new Promise((resolve, reject) => {
-          const aborted = () => {
-            answer = null;
-            reject(signal.reason);
-          };
-          signal.addEventListener("abort", aborted, { once: true });
-          answer = (value) => {
-            signal.removeEventListener("abort", aborted);
-            answer = null;
-            resolve(value);
-          };
-        });
-        await persist({
-          status: "waiting_captcha",
-          message: `กรอกรหัสยืนยันเพื่อซิงค์ ${scope.province} · ${scope.district}`,
-          ...challenge,
-        });
-        const captcha = await captchaPromise;
         await persist({
           status: "extracting",
           captchaUrl: null,
@@ -177,7 +167,7 @@ export function createSyncService({
           saved: new Map(),
           extractionComplete: false,
         };
-        await source.extract(job, captcha, signal, collect);
+        await source.extract(job, signal, collect);
         await collect(job);
         if (!job.extractionComplete)
           throw Error(job.warnings.join(" · ") || "ต้นทางส่งรายการไม่ครบ");
@@ -203,7 +193,6 @@ export function createSyncService({
         finishedAt: clock().toISOString(),
       });
     } finally {
-      answer = null;
       try {
         const s = await db.getSettings();
         if (!geoOnly)
@@ -302,17 +291,11 @@ export function createSyncService({
         throw e;
       }
     },
-    submitCaptcha(code) {
-      if (!answer || state.status !== "waiting_captcha")
-        throw Error("ไม่มีงานรอรหัสยืนยัน");
-      if (!/^\d{6}$/.test(code)) throw Error("กรอกรหัส 6 หลัก");
-      answer(code);
-    },
     cancel() {
       controller?.abort();
     },
     async tick() {
-      if (ticking || (running && state.status !== "waiting_captcha")) return;
+      if (ticking || running) return;
       ticking = true;
       try {
         await cleanup();

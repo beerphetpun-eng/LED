@@ -12,7 +12,7 @@ flowchart LR
   Ports --> Adapters[LED, LandsMaps, filesystem, PostgreSQL]
 ```
 
-`createSyncService` receives repository, source, geocoder, files, geography and an injectable clock. It owns the single-job lock, scheduled runs, scope queue, human CAPTCHA wait, cancellation, progress, source errors and retention. Restarted work is marked interrupted; a new run safely upserts records again.
+`createSyncService` receives repository, source, geocoder, files, geography and an injectable clock. It owns the single-job lock, scheduled runs, scope queue, background source verification, cancellation, progress, source errors and retention. Restarted work is marked interrupted; a new run safely upserts records again.
 
 The LED adapter owns form preparation, pagination, red-row exclusion and detail extraction. The sync form has only geographical values; display filters never reach the adapter. A stable identity uses source sale lot, asset sequence, case and province. It deliberately distinguishes a new sale lot from a repeated fetch of the same listing.
 

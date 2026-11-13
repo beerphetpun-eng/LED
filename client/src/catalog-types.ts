@@ -30,6 +30,9 @@ export type FacebookResult = {
 };
 export type Property = {
   id: string;
+  componentKey?: string;
+  address?: string;
+  assetComponents?: Property[];
   propertyType: string;
   province: string;
   district: string;
@@ -71,7 +74,6 @@ export type Runtime = {
   running: boolean;
   status: string;
   message: string;
-  captchaUrl?: string;
   pages?: number;
   seen?: number;
   skippedRed?: number;

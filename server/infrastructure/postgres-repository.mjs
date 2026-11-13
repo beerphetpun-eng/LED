@@ -1,5 +1,6 @@
 import pg from "pg";
 import { readFile } from "node:fs/promises";
+import { mergeComponents } from "../domain/asset-components.mjs";
 import {
   defaultSettings,
   emptyUser,
@@ -132,7 +133,7 @@ export async function upsertProperty(source, runId, retention) {
       ["deed", "province", "district", "subdistrict"].every(
         (k) => old.source[k] === source[k],
       );
-    const merged =
+    let merged =
       source.status === "failed" && old
         ? { ...old.source, error: source.error }
         : {
@@ -140,6 +141,8 @@ export async function upsertProperty(source, runId, retention) {
             parcels: sameParcel ? old.source.parcels || [] : [],
             facebook: old?.source.facebook || null,
           };
+    if (source.status !== "failed")
+      merged = mergeComponents(old?.source, merged);
     if (
       merged.parcels.length &&
       merged.parcels.every((p) => p.status === "located" && p.mapEvidenceUrl)
@@ -188,12 +191,15 @@ export async function allProperties() {
 export async function queryProperties(filters) {
   const all = await allProperties(),
     items = filterProperties(all, filters);
-  const summary = items.map(({ rawText, sourceRow, facebook, ...p }) => ({
-    ...p,
-    facebook: facebook
-      ? { checkedAt: facebook.checkedAt, count: facebook.posts?.length || 0 }
-      : null,
-  }));
+  const summary = items.map(
+    ({ rawText, sourceRow, facebook, assetComponents, ...p }) => ({
+      ...p,
+      assetComponentCount: assetComponents?.length || 1,
+      facebook: facebook
+        ? { checkedAt: facebook.checkedAt, count: facebook.posts?.length || 0 }
+        : null,
+    }),
+  );
   return {
     items: summary,
     total: all.length,
