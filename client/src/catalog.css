@@ -489,6 +489,14 @@ a {
   text-align: center;
   white-space: nowrap;
 }
+.price-marker.highlighted span {
+  background: #f7cd66;
+  border-color: #6a4512;
+  color: #352507;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 3px 8px #0005;
+}
 .results-toolbar {
   display: flex;
   align-items: center;
@@ -540,13 +548,35 @@ a {
 .property-table td {
   text-align: left;
   white-space: nowrap;
-  padding: 8px 12px;
+  padding: 6px 8px;
   border-bottom: 1px solid #e0e6da;
 }
 .property-table th {
   position: sticky;
   top: 0;
+  z-index: 1;
   background: #edf2e5;
+}
+.property-table .table-open {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 #e0e6da;
+}
+.property-table th.table-open {
+  z-index: 3;
+}
+.property-table td.table-open {
+  z-index: 2;
+  background: white;
+}
+.property-table td.table-open button {
+  padding: 4px 8px;
+}
+.table-text {
+  display: block;
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .property-table th button {
   border: none;

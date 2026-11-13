@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import {
   Compass,
@@ -103,6 +103,7 @@ function App() {
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
     [focusSelected, setFocusSelected] = useState(false),
+    [highlightedPin, setHighlightedPin] = useState<string | null>(null),
     [filters, setFilters] = useState<Filters>(() => {
       try {
         return JSON.parse(
@@ -206,6 +207,7 @@ function App() {
   async function select(p: Property, focusMap = true) {
     await report("กำลังอ่านรายละเอียด", async () => {
       const d = await api<Property>("/properties/" + p.id);
+      if (focusMap) setHighlightedPin(null);
       setFocusSelected(focusMap);
       setSelected(d);
     });
@@ -683,35 +685,32 @@ function App() {
                     selected={selected}
                     focusSelected={focusSelected}
                   />
-                  {pins.map(({ p, v }) => (
-                    <Marker
-                      key={p.id + v.deed}
-                      position={[v.latitude!, v.longitude!]}
-                      icon={L.divIcon({
-                        className: "price-marker",
-                        html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
-                        iconSize: [105, 35],
-                        iconAnchor: [52, 35],
-                      })}
-                      eventHandlers={{
-                        click: () => {
-                          void select(p, false).catch(() => {});
-                        },
-                      }}
-                    >
-                      <Popup autoPan={false}>
-                        <b>{p.propertyType}</b>
-                        <p>
-                          ลำดับ {p.assetSequence} · คดี {p.caseNumber}
-                        </p>
-                        <button
-                          onClick={() => void select(p, false).catch(() => {})}
-                        >
-                          ดูรายละเอียดและภาพ
-                        </button>
-                      </Popup>
-                    </Marker>
-                  ))}
+                  {pins.map(({ p, v }) => {
+                    const pinKey = `${p.id}:${v.deed}`;
+                    const highlighted = highlightedPin === pinKey;
+                    return (
+                      <Marker
+                        key={pinKey}
+                        position={[v.latitude!, v.longitude!]}
+                        zIndexOffset={highlighted ? 1000 : 0}
+                        autoPanOnFocus={false}
+                        icon={L.divIcon({
+                          className: highlighted
+                            ? "price-marker highlighted"
+                            : "price-marker",
+                          html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
+                          iconSize: [105, 35],
+                          iconAnchor: [52, 35],
+                        })}
+                        eventHandlers={{
+                          click: () => {
+                            setHighlightedPin(pinKey);
+                            void select(p, false).catch(() => {});
+                          },
+                        }}
+                      />
+                    );
+                  })}
                 </MapContainer>
                 {!pins.length && (
                   <div className="map-empty">
