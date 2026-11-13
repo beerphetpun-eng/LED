@@ -18,6 +18,13 @@ body {
   display: flex;
   flex-direction: column;
 }
+.app-shell,
+.app-shell * {
+  /* Keep the arrow on Leaflet drag targets and native form controls too. */
+  cursor:
+    url("./large-arrow.png") 3 3,
+    default !important;
+}
 button,
 input,
 select,
@@ -25,7 +32,6 @@ textarea {
   font: inherit;
 }
 button {
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -42,7 +48,6 @@ button:hover {
 }
 button:disabled {
   opacity: 0.5;
-  cursor: default;
 }
 button:focus-visible,
 a:focus-visible,
