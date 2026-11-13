@@ -236,6 +236,85 @@ test("source errors persist an alert and incomplete status", async () => {
   assert.equal(t.service.status().status, "partial");
   assert.deepEqual(t.messages, ["source changed"]);
 });
+
+test("stopping announcement sync preserves an active LandsMaps cooldown", async () => {
+  const t = setup(false, true);
+  const cooldown = "2026-11-12T17:02:00.000Z";
+  t.states.sync_runtime = { status: "waiting_limit", geoRetryAt: cooldown };
+  await t.service.init();
+  await t.service.start();
+  await waitFor(t.service, "extracting");
+  t.service.cancel();
+  await t.service.task;
+  assert.equal(t.states.sync_runtime.geoRetryAt, cooldown);
+  await assert.rejects(t.service.start(true), /รอโควตา/);
+});
+
+test("daily parcel retry keeps verified coordinates and evidence after a failed refresh", async () => {
+  let now = new Date("2026-11-12T12:00:00Z");
+  const calls = [];
+  const t = setup(
+    false,
+    false,
+    {
+      locate: async (p, deed) => {
+        calls.push(deed);
+        return {
+          deed,
+          status: "not_found",
+          latitude: null,
+          longitude: null,
+          note: "ไม่พบแปลง",
+        };
+      },
+    },
+    () => now,
+  );
+  t.states.sync_runtime = {
+    status: "completed",
+    nextRunAt: "2026-11-19T12:00:00Z",
+  };
+  const original = {
+    deed: "1",
+    status: "located",
+    latitude: 18.8,
+    longitude: 98.9,
+    evidenceUrl: "/evidence/old.png",
+    backgroundReady: false,
+    lookupDay: "2026-11-11",
+  };
+  t.records.set("verified", { id: "verified", deed: "1", parcels: [original] });
+  t.records.set("untried", { id: "untried", deed: "2", parcels: [] });
+  await t.service.init();
+  await t.service.tick();
+  await t.service.task;
+  assert.deepEqual(calls, ["2", "1"]);
+  assert.deepEqual(t.records.get("verified").parcels[0], {
+    ...original,
+    lookupDay: "2026-11-12",
+    lookupWarning: "ไม่พบแปลง",
+  });
+  assert.equal(t.records.get("verified").status, "needs_review");
+  assert.equal(t.extracts, 0);
+  const restarted = createSyncService(t.options);
+  await restarted.init();
+  await restarted.tick();
+  assert.equal(calls.length, 2);
+  now = new Date("2026-11-13T12:00:00Z");
+  await restarted.tick();
+  await restarted.task;
+  assert.equal(calls.length, 4);
+  assert.equal(t.extracts, 0);
+});
+
+test("saving a selected scope immediately starts sync even if recurring runs are disabled", async () => {
+  const t = setup();
+  await t.service.settings({ ...settings, enabled: false });
+  await t.service.task;
+  assert.equal(t.extracts, 2);
+  await t.service.settings({ ...settings, enabled: false, scopes: [] });
+  assert.equal(t.extracts, 2);
+});
 test("new deeds in an existing bundle are geocoded without repeating complete parcels", async () => {
   const seen = [];
   const t = setup(false, false, {

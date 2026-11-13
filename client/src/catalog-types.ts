@@ -14,6 +14,7 @@ export type Parcel = {
   mapEvidenceUrl?: string;
   backgroundReady?: boolean;
   note?: string;
+  lookupWarning?: string;
 };
 export type FacebookResult = {
   checkedAt: string;
@@ -93,6 +94,7 @@ export type Runtime = {
   skippedExisting?: number;
   nextRunAt?: string;
   geoRetryAt?: string | null;
+  nextGeoRunAt?: string;
   quotaMessage?: string;
   scopeIndex?: number;
   scopeCount?: number;
