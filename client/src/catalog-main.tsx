@@ -31,6 +31,7 @@ import { api, money, time } from "./catalog-api";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
 import { AlertMenu } from "./AlertMenu";
+import { PropertyTable } from "./PropertyTable";
 import "leaflet/dist/leaflet.css";
 import "./catalog.css";
 const emptyLibrary: Library = {
@@ -83,7 +84,9 @@ function App() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
     [full, setFull] = useState(false),
-    [filtersCollapsed, setFiltersCollapsed] = useState(false),
+    [filtersCollapsed, setFiltersCollapsed] = useState(true),
+    [listVisible, setListVisible] = useState(false),
+    [listMode, setListMode] = useState<"cards" | "table">("cards"),
     [image, setImage] = useState(""),
     [selected, setSelected] = useState<Property | null>(null),
     [filters, setFilters] = useState<Filters>(() => {
@@ -298,6 +301,9 @@ function App() {
               })
             }
           />
+          <button onClick={exportJSON} disabled={!library.items.length}>
+            <ArrowDownToLine size={15} /> ส่งออก JSON
+          </button>
         </nav>
         <span className="db-badge">
           <Database size={14} />
@@ -321,15 +327,17 @@ function App() {
                     : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
                   : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
               </small>
-              {sync?.runtime.geoRetryAt && (
+              {(sync?.runtime.geoRetryAt || sync?.runtime.nextGeoRunAt) && (
                 <small>
-                  {sync.runtime.status !== "waiting_limit" &&
+                  {sync.runtime.geoRetryAt &&
+                    sync.runtime.status !== "waiting_limit" &&
                     sync.runtime.quotaMessage &&
                     `${sync.runtime.quotaMessage} · `}
                   {sync.settings.enabled
-                    ? "ค้นพิกัดต่ออัตโนมัติ"
-                    : "ครบเวลารอโควตา"}{" "}
-                  {time(sync.runtime.geoRetryAt)}
+                    ? "รอบค้นพิกัดถัดไป"
+                    : "ปิดการค้นพิกัดอัตโนมัติ"}
+                  {sync.settings.enabled &&
+                    ` ${time(sync.runtime.geoRetryAt || sync.runtime.nextGeoRunAt)}`}
                 </small>
               )}
             </div>
@@ -537,16 +545,6 @@ function App() {
             </label>
           </aside>
           <section className="results">
-            <div className="results-heading">
-              <div>
-                <span className="eyebrow">PROPERTY INTELLIGENCE</span>
-                <h2>คลังทรัพย์ของคุณ</h2>
-              </div>
-              <button onClick={exportJSON} disabled={!library.items.length}>
-                <ArrowDownToLine size={15} />
-                ส่งออก JSON
-              </button>
-            </div>
             <div className="stats">
               <div>
                 <span>ทรัพย์ทั้งหมด</span>
@@ -622,88 +620,122 @@ function App() {
               {!pins.length && (
                 <div className="map-empty">
                   {library.items.length
-                    ? "ทรัพย์ที่ยังไม่มีพิกัดจะอยู่ในรายการด้านล่าง"
+                    ? "เปิดรายการทรัพย์ด้านล่างเพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
                     : "ผลค้นหาจะแสดงบนแผนที่นี้"}
                   <small>ปักหมุดเฉพาะพิกัดที่ค้นพบจริงจาก LandsMaps</small>
                 </div>
               )}
             </div>
             <div className="list-title">
-              <h3>
-                รายการทรัพย์ <span>{library.items.length}</span>
-              </h3>
-              <small>
-                {loading ? "กำลังอ่านข้อมูล…" : "ข้อมูลและภาพเก็บในเครื่อง"}
-              </small>
+              <button
+                aria-expanded={listVisible}
+                aria-controls="property-list"
+                onClick={() => setListVisible(!listVisible)}
+              >
+                {listVisible ? "ซ่อนรายการทรัพย์" : "แสดงรายการทรัพย์"}{" "}
+                <span>{library.items.length}</span>
+              </button>
+              {listVisible && (
+                <label className="list-mode">
+                  มุมมอง
+                  <select
+                    value={listMode}
+                    onChange={(e) =>
+                      setListMode(
+                        e.target.value === "table" ? "table" : "cards",
+                      )
+                    }
+                  >
+                    <option value="cards">การ์ด</option>
+                    <option value="table">ตาราง</option>
+                  </select>
+                </label>
+              )}
             </div>
-            <div className="property-grid">
-              {library.items.map((p) => (
-                <button
-                  className="property-card"
-                  key={p.id}
-                  onClick={() => void select(p).catch(() => {})}
-                >
-                  <div className="card-top">
-                    <span>ลำดับ {p.assetSequence}</span>
-                    <span>
-                      {p.user.bookmarked && (
-                        <Bookmark size={14} fill="currentColor" />
-                      )}
-                      {p.user.stars > 0 && (
-                        <>
-                          <Star size={14} fill="currentColor" />
-                          {p.user.stars}
-                        </>
-                      )}
-                    </span>
+            <section id="property-list" hidden={!listVisible}>
+              {listVisible &&
+                (listMode === "table" ? (
+                  <PropertyTable
+                    items={library.items}
+                    onSelect={(p) => void select(p).catch(() => {})}
+                  />
+                ) : (
+                  <div className="property-grid">
+                    {library.items.map((p) => (
+                      <button
+                        className="property-card"
+                        key={p.id}
+                        onClick={() => void select(p).catch(() => {})}
+                      >
+                        <div className="card-top">
+                          <span>ลำดับ {p.assetSequence}</span>
+                          <span>
+                            {p.user.bookmarked && (
+                              <Bookmark size={14} fill="currentColor" />
+                            )}
+                            {p.user.stars > 0 && (
+                              <>
+                                <Star size={14} fill="currentColor" />
+                                {p.user.stars}
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        <h3>{p.propertyType}</h3>
+                        <p>
+                          {p.subdistrict} · {p.district}
+                        </p>
+                        <small>
+                          คดี {p.caseNumber} · โฉนด {p.deed || "—"}
+                        </small>
+                        <div className="card-bottom">
+                          <span>{p.areaText}</span>
+                          <strong>฿ {money(p.pricing.total)}</strong>
+                        </div>
+                        {p.pricing.carriesMortgage && (
+                          <small>รวมจำนองติดไป</small>
+                        )}
+                        {p.pricing.warning && (
+                          <small className="inline-error">
+                            {p.pricing.warning}
+                          </small>
+                        )}
+                        <div className="card-status">
+                          <span>
+                            {p.parcels.some((v) => v.latitude !== null)
+                              ? "พบพิกัด"
+                              : "รอพิกัด / ตรวจสอบ"}
+                          </span>
+                          <span>
+                            {p.user.auctionStatus === "ended"
+                              ? "จบประมูลแล้ว"
+                              : p.user.auctionStatus === "auctioning"
+                                ? "อยู่ระหว่างประมูล"
+                                : "ยังไม่ระบุสถานะ"}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  <h3>{p.propertyType}</h3>
+                ))}
+              {listVisible && !library.items.length && (
+                <div className="empty">
+                  <Compass size={32} />
+                  <h3>
+                    {loading
+                      ? "กำลังอ่านข้อมูล…"
+                      : library.total
+                        ? "ไม่พบทรัพย์ตรงตัวกรอง"
+                        : "เริ่มต้นคลังทรัพย์ชุดใหม่"}
+                  </h3>
                   <p>
-                    {p.subdistrict} · {p.district}
+                    {library.total
+                      ? "ลองปรับราคา พื้นที่ หรือดาวที่เลือก"
+                      : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กดซิงค์เพื่อเริ่มดึงข้อมูล"}
                   </p>
-                  <small>
-                    คดี {p.caseNumber} · โฉนด {p.deed || "—"}
-                  </small>
-                  <div className="card-bottom">
-                    <span>{p.areaText}</span>
-                    <strong>฿ {money(p.pricing.total)}</strong>
-                  </div>
-                  {p.pricing.carriesMortgage && <small>รวมจำนองติดไป</small>}
-                  {p.pricing.warning && (
-                    <small className="inline-error">{p.pricing.warning}</small>
-                  )}
-                  <div className="card-status">
-                    <span>
-                      {p.parcels.some((v) => v.latitude !== null)
-                        ? "พบพิกัด"
-                        : "รอพิกัด / ตรวจสอบ"}
-                    </span>
-                    <span>
-                      {p.user.auctionStatus === "ended"
-                        ? "จบประมูลแล้ว"
-                        : p.user.auctionStatus === "auctioning"
-                          ? "อยู่ระหว่างประมูล"
-                          : "ยังไม่ระบุสถานะ"}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {!library.items.length && (
-              <div className="empty">
-                <Compass size={32} />
-                <h3>
-                  {library.total
-                    ? "ไม่พบทรัพย์ตรงตัวกรอง"
-                    : "เริ่มต้นคลังทรัพย์ชุดใหม่"}
-                </h3>
-                <p>
-                  {library.total
-                    ? "ลองปรับราคา พื้นที่ หรือดาวที่เลือก"
-                    : "ค่าเริ่มต้นซิงค์เชียงใหม่ · เมืองเชียงใหม่ กดซิงค์เพื่อเริ่มดึงข้อมูล"}
-                </p>
-              </div>
-            )}
+                </div>
+              )}
+            </section>
             <footer>
               แหล่งข้อมูล: กรมบังคับคดี · LandsMaps · Facebook
               สำนักงานบังคับคดีเชียงใหม่

@@ -1,9 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { validateSettings, missingParcelDeeds } from "../domain/catalog.mjs";
+import {
+  bangkokDay,
+  validateSettings,
+  missingParcelDeeds,
+} from "../domain/catalog.mjs";
 import {
   SourceUnavailableError,
   SourceRateLimitError,
 } from "../domain/errors.mjs";
+
+const dayMs = 24 * 60 * 60 * 1000;
+const verified = (p) =>
+  p?.status === "located" &&
+  Number.isFinite(p.latitude) &&
+  Number.isFinite(p.longitude);
 
 export function createSyncService({
   repository: db,
@@ -17,7 +27,8 @@ export function createSyncService({
     running = false,
     controller,
     timer,
-    ticking = false;
+    ticking = false,
+    savingSettings = false;
   const persist = async (patch) => {
     state = { ...state, ...patch, updatedAt: clock().toISOString() };
     await db.setState("sync_runtime", state);
@@ -64,8 +75,11 @@ export function createSyncService({
       skippedExisting: (state.baseExisting || 0) + (job.skippedExisting || 0),
     });
   }
-  async function lookup(signal) {
+  async function lookup(signal, automatic) {
     const all = await db.allProperties();
+    const day = bangkokDay(clock());
+    const lastLookup = (p, deed) =>
+      p.parcels?.find((v) => v.deed === deed)?.lookupDay || "";
     const cache = new Map();
     const cacheKey = (p, deed) =>
       JSON.stringify([p.province, p.district, p.subdistrict, deed]);
@@ -83,29 +97,31 @@ export function createSyncService({
           cache.set(cacheKey(c, parcel.deed), parcel);
         }
       }
-    const records = all.filter(
-      (p) =>
-        p.deed && p.status !== "failed" && missingParcelDeeds(p).length > 0,
-    );
+    const records = all
+      .filter((p) => p.deed && p.status !== "failed")
+      .map((p) => ({
+        p,
+        deeds: missingParcelDeeds(p)
+          .filter((deed) => !automatic || lastLookup(p, deed) !== day)
+          .sort((a, b) => lastLookup(p, a).localeCompare(lastLookup(p, b))),
+      }))
+      .filter(({ deeds }) => deeds.length)
+      .sort((a, b) =>
+        lastLookup(a.p, a.deeds[0]).localeCompare(lastLookup(b.p, b.deeds[0])),
+      );
     for (let index = 0; index < records.length; index++) {
       signal.throwIfAborted();
-      const p = records[index];
+      const { p, deeds } = records[index];
       await persist({
         status: "geocoding",
         message: `ค้นหาพิกัด ${index + 1}/${records.length} · โฉนด ${p.deed}`,
         geoDone: index,
         geoTotal: records.length,
       });
-      const complete = (p.parcels || []).filter(
-        (v) =>
-          v.status === "located" &&
-          v.mapEvidenceUrl &&
-          v.backgroundReady !== false,
-      );
       let parcels = p.parcels || [];
-      for (const deed of p.deed
-        .split(", ")
-        .filter((d) => !complete.some((v) => v.deed === d))) {
+      for (const deed of deeds) {
+        signal.throwIfAborted();
+        const previous = parcels.find((v) => v.deed === deed);
         let parcel;
         let attempts = 0;
         try {
@@ -117,7 +133,7 @@ export function createSyncService({
           parcel = cache.get(key);
           if (!parcel) {
             attempts++;
-            parcel = await geocoder.locate(record, deed, "catalog", signal);
+            parcel = await geocoder.locate(record, deed, state.runId, signal);
           }
           if (
             parcel.status === "located" &&
@@ -126,8 +142,8 @@ export function createSyncService({
           )
             cache.set(key, parcel);
         } catch (e) {
-          signal.throwIfAborted();
           if (e instanceof SourceUnavailableError) throw e;
+          signal.throwIfAborted();
           parcel = {
             deed,
             status: "lookup_failed",
@@ -136,6 +152,7 @@ export function createSyncService({
             note: e.message.split("\n")[0],
           };
         }
+        signal.throwIfAborted();
         const prefix = `โฉนด ${deed} ${p.district}: `;
         const ready =
           parcel.status === "located" &&
@@ -146,28 +163,34 @@ export function createSyncService({
           message: ready
             ? null
             : prefix + (parcel.note || "หลักฐานพิกัดยังไม่ครบ"),
-          retryable:
-            !ready &&
-            parcel.status !== "not_found" &&
-            !/ต้องตรวจสอบด้วยตนเอง/.test(parcel.note || ""),
+          retryable: !ready,
           attempts,
           legacyPrefix: prefix,
         });
-        parcels = [...parcels.filter((v) => v.deed !== deed), parcel];
+        const saved =
+          verified(previous) && !verified(parcel)
+            ? {
+                ...previous,
+                lookupWarning: parcel.note || "ค้นพิกัดซ้ำไม่สำเร็จ",
+              }
+            : parcel;
+        parcels = [
+          ...parcels.filter((v) => v.deed !== deed),
+          { ...saved, lookupDay: day },
+        ];
         await db.updateSource(p.id, {
           parcels,
-          status:
-            parcels.length === p.deed.split(", ").length &&
-            parcels.every((v) => v.status === "located")
-              ? "located"
-              : "needs_review",
+          status: missingParcelDeeds({ ...p, parcels }).length
+            ? "needs_review"
+            : "located",
         });
       }
     }
     await persist({ geoDone: records.length });
   }
-  async function run(scopes, geoOnly) {
+  async function run(scopes, geoOnly, automatic) {
     const signal = controller.signal;
+    let lookedUp = false;
     try {
       await cleanup();
       for (let index = 0; index < scopes.length; index++) {
@@ -223,10 +246,12 @@ export function createSyncService({
         });
         return;
       }
-      await lookup(signal);
+      lookedUp = true;
+      await lookup(signal, automatic);
       await persist({
         status: "completed",
         geoRetryAt: null,
+        nextGeoRunAt: new Date(clock().getTime() + dayMs).toISOString(),
         message: geoOnly
           ? "จบการค้นพิกัด รายการที่ไม่พบดูได้จากแจ้งเตือน"
           : "ซิงค์ครบขอบเขตที่เลือกแล้ว",
@@ -236,6 +261,7 @@ export function createSyncService({
     } catch (e) {
       const cancelled = signal.aborted;
       const limited = e instanceof SourceRateLimitError;
+      const cancelledLookup = cancelled && lookedUp && !limited;
       if (!cancelled && !limited) await db.alert(e.message.split("\n")[0]);
       await persist({
         status: cancelled ? "cancelled" : limited ? "waiting_limit" : "partial",
@@ -245,15 +271,17 @@ export function createSyncService({
               quotaMessage: e.message.split("\n")[0],
             }
           : {}),
-        ...(cancelled
-          ? { geoRetryAt: null }
-          : limited || state.geoRetryAt
-            ? {
-                geoRetryAt: new Date(
-                  clock().getTime() + (e.retryAfterMs || 302 * 60000),
-                ).toISOString(),
-              }
-            : {}),
+        ...(limited || (!cancelled && lookedUp && state.geoRetryAt)
+          ? {
+              geoRetryAt: new Date(
+                clock().getTime() + (e.retryAfterMs || 302 * 60000),
+              ).toISOString(),
+            }
+          : {}),
+        ...(cancelledLookup ? { geoRetryAt: null } : {}),
+        ...(!limited && lookedUp
+          ? { nextGeoRunAt: new Date(clock().getTime() + dayMs).toISOString() }
+          : {}),
         message: cancelled
           ? "หยุดซิงค์แล้ว ข้อมูลที่บันทึกยังอยู่"
           : e.message.split("\n")[0],
@@ -305,14 +333,22 @@ export function createSyncService({
       }
     },
     async settings(value) {
-      if (running) throw Error("หยุดซิงค์ก่อนเปลี่ยนขอบเขต");
+      if (running || savingSettings) throw Error("หยุดซิงค์ก่อนเปลี่ยนขอบเขต");
       const checked = validateSettings(value, geography);
-      await db.saveSettings(checked);
-      await persist({ nextRunAt: clock().toISOString() });
+      savingSettings = true;
+      try {
+        await db.saveSettings(checked);
+        await persist({
+          nextRunAt: checked.scopes.length ? clock().toISOString() : null,
+        });
+      } finally {
+        savingSettings = false;
+      }
+      if (checked.scopes.length) await service.start(false, true);
       return checked;
     },
-    async start(geoOnly = false) {
-      if (running) throw Error("มีงานซิงค์กำลังทำงานอยู่");
+    async start(geoOnly = false, automatic = false) {
+      if (running || savingSettings) throw Error("มีงานซิงค์กำลังทำงานอยู่");
       if (
         geoOnly &&
         state.geoRetryAt &&
@@ -356,7 +392,7 @@ export function createSyncService({
           geoTotal: 0,
           captchaUrl: null,
         });
-        service.task = run(scopes, geoOnly).catch(async (e) => {
+        service.task = run(scopes, geoOnly, automatic).catch(async (e) => {
           running = false;
           await db.alert("ระบบซิงค์ผิดพลาด: " + e.message).catch(() => {});
           state = {
@@ -376,23 +412,17 @@ export function createSyncService({
       controller?.abort();
     },
     async tick() {
-      if (ticking || running) return;
+      if (ticking || running || savingSettings) return;
       ticking = true;
       try {
         await cleanup();
-        if (running) return;
         const s = await db.getSettings();
-        if (
-          s.enabled &&
-          state.geoRetryAt &&
-          Date.parse(state.geoRetryAt) <= clock().getTime()
-        )
-          await service.start(true);
-        else if (
-          s.enabled &&
-          (!state.nextRunAt || Date.parse(state.nextRunAt) <= clock().getTime())
-        )
-          await service.start();
+        if (running || savingSettings || !s.enabled) return;
+        const now = clock().getTime();
+        const due = (at) => !at || Date.parse(at) <= now;
+        if (due(state.nextRunAt)) await service.start(false, true);
+        else if (due(state.geoRetryAt || state.nextGeoRunAt))
+          await service.start(true, true);
       } catch (e) {
         await db.alert(e.message);
       } finally {

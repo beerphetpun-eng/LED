@@ -315,6 +315,11 @@ export function PropertyDetails({
             >
               {v.note}
             </small>
+            {v.lookupWarning && (
+              <p className="inline-error">
+                ค้นซ้ำล่าสุด: {v.lookupWarning} · ยังใช้พิกัดที่ยืนยันไว้เดิม
+              </p>
+            )}
           </div>
         ))}
         <section className="facebook">

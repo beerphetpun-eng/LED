@@ -51,7 +51,7 @@ export function SyncPanel({
             disabled={disabled}
             onChange={(e) => patch({ enabled: e.target.checked })}
           />
-          ซิงค์อัตโนมัติขณะโปรแกรมเปิด
+          ซิงค์อัตโนมัติขณะโปรแกรมเปิด (รวมค้นพิกัดที่ยังขาดทุกวัน)
         </label>
         <label>
           ความถี่
@@ -216,7 +216,11 @@ export function SyncPanel({
           }}
         >
           <Save size={16} />
-          {saving ? "กำลังบันทึก" : "บันทึกการตั้งค่าซิงค์"}
+          {saving
+            ? "กำลังบันทึก"
+            : count
+              ? "บันทึกและเริ่มซิงค์"
+              : "บันทึกการตั้งค่าซิงค์"}
         </button>
       </div>
     </section>

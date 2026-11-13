@@ -135,7 +135,7 @@ export function createLandsMapsGeocoder(browser) {
         const backgroundReady = await waitForBackground(page, signal);
         const evidenceUrl = await browser.screenshot(
           page,
-          `${record.id}-lands-${deed}`,
+          `${record.id}-lands-${deed}-${jobId}`,
         );
         let mapEvidenceUrl = null,
           captureWarning = "";
@@ -150,7 +150,7 @@ export function createLandsMapsGeocoder(browser) {
           await delay(2500, undefined, { signal });
           mapEvidenceUrl = await browser.screenshot(
             page,
-            `${record.id}-lands-${deed}-map`,
+            `${record.id}-lands-${deed}-${jobId}-map`,
           );
         } catch (e) {
           signal.throwIfAborted();
