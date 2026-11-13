@@ -12,6 +12,12 @@
 body {
   margin: 0;
 }
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
 button,
 input,
 select,
@@ -118,6 +124,7 @@ a {
 }
 .topbar {
   height: 83px;
+  flex: none;
   background: white;
   border-bottom: 1px solid #e1e5da;
   display: flex;
@@ -279,8 +286,9 @@ a {
 }
 .explorer {
   display: grid;
+  flex: 1;
+  min-height: 0;
   grid-template-columns: 292px minmax(0, 1fr);
-  min-height: calc(100vh - 83px);
 }
 .explorer.filters-collapsed {
   grid-template-columns: 52px minmax(0, 1fr);
@@ -300,6 +308,8 @@ a {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  overflow: auto;
 }
 .filters h1 {
   margin: 0;
@@ -358,8 +368,19 @@ a {
   padding: 12px 0;
 }
 .results {
-  padding: 30px;
+  padding: 16px 24px 8px;
   min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.results > [role="tabpanel"] {
+  min-height: 0;
+  min-width: 0;
+}
+#property-list {
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .stats {
   display: flex;
@@ -390,7 +411,7 @@ a {
   font-variant-numeric: tabular-nums;
 }
 .map-shell {
-  height: max(430px, calc(100dvh - 250px));
+  height: 100%;
   position: relative;
   border: 1px solid #d4decd;
   border-radius: 15px;
@@ -503,7 +524,7 @@ a {
 }
 .property-table-scroll {
   overflow: auto;
-  max-height: max(350px, calc(100dvh - 250px));
+  max-height: 100%;
   max-width: 100%;
   border: 1px solid #e0e6da;
   border-radius: 10px;
@@ -617,12 +638,16 @@ a {
 footer {
   font-size: 10px;
   color: #9aa38c;
-  padding: 25px 0;
+  padding-top: 6px;
 }
 .sync-page {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   max-width: 1300px;
-  margin: auto;
+  margin: 0 auto;
   padding: 35px;
+  overflow: auto;
 }
 .sync-panel {
   background: white;
@@ -1056,7 +1081,7 @@ footer {
 }
 @media (min-width: 1600px) {
   .results {
-    padding: 35px 45px;
+    padding-inline: 32px;
   }
   .explorer {
     grid-template-columns: 325px minmax(0, 1fr);
@@ -1070,7 +1095,7 @@ footer {
     grid-template-columns: 250px minmax(0, 1fr);
   }
   .results {
-    padding: 22px;
+    padding-inline: 16px;
   }
   .sync-options {
     grid-template-columns: 1fr 1fr;
@@ -1117,6 +1142,7 @@ footer {
   }
   .filters {
     padding: 24px 20px;
+    max-height: 35dvh;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
@@ -1139,10 +1165,8 @@ footer {
     display: none;
   }
   .results {
-    padding: 20px 16px;
-  }
-  .map-shell:not(.expanded) {
-    height: max(360px, calc(100dvh - 320px));
+    flex: 1;
+    padding: 8px 12px 4px;
   }
   .map-empty {
     white-space: normal;
