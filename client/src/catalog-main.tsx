@@ -621,24 +621,24 @@ function App() {
                 </label>
               )}
             </div>
-            <div className="stats">
+            <dl className="stats" aria-label="สรุปผลค้นหา">
               <div>
-                <span>ทรัพย์ทั้งหมด</span>
-                <strong>{library.total}</strong>
+                <dt>ทั้งหมด</dt>
+                <dd>{library.total}</dd>
               </div>
               <div>
-                <span>ตรงตัวกรอง</span>
-                <strong>{library.items.length}</strong>
+                <dt>ตรงตัวกรอง</dt>
+                <dd>{library.items.length}</dd>
               </div>
               <div>
-                <span>ทรัพย์ที่มีพิกัด</span>
-                <strong>{mapped.length}</strong>
+                <dt>ทรัพย์มีพิกัด</dt>
+                <dd>{mapped.length}</dd>
               </div>
               <div>
-                <span>หมุดบนแผนที่</span>
-                <strong>{pins.length}</strong>
+                <dt>หมุด</dt>
+                <dd>{pins.length}</dd>
               </div>
-            </div>
+            </dl>
             <section
               id="property-map"
               role="tabpanel"
