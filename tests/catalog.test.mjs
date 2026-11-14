@@ -173,6 +173,15 @@ test("scope settings reject unknown districts and never accept price conditions"
       price_end: "123",
     };
   assert.equal(validateSettings(s, g).price_end, undefined);
+  assert.equal(validateSettings(s, g).duplicatePolicy, "skip_unchanged");
+  assert.equal(
+    validateSettings({ ...s, duplicatePolicy: "refresh_all" }, g)
+      .duplicatePolicy,
+    "refresh_all",
+  );
+  assert.throws(() =>
+    validateSettings({ ...s, duplicatePolicy: "unknown" }, g),
+  );
   assert.throws(() =>
     validateSettings(
       { ...s, scopes: [{ provinceCode: "50", districtCodes: ["999"] }] },

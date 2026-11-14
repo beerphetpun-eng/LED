@@ -230,6 +230,7 @@ export function createLedSource(
         if (
           existing?.rawText &&
           !job.targetId &&
+          job.duplicatePolicy !== "refresh_all" &&
           existing.screenshotUrl &&
           existing.evidenceReady === true &&
           existing.evidenceVersion === evidenceVersion &&

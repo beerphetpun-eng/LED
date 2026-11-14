@@ -396,9 +396,20 @@ test("daily parcel retry keeps verified coordinates and evidence after a failed 
 
 test("saving a selected scope immediately starts sync even if recurring runs are disabled", async () => {
   const t = setup();
-  await t.service.settings({ ...settings, enabled: false });
+  const policies = [];
+  const extract = t.options.source.extract;
+  t.options.source.extract = async (job, ...args) => {
+    policies.push(job.duplicatePolicy);
+    await extract(job, ...args);
+  };
+  await t.service.settings({
+    ...settings,
+    enabled: false,
+    duplicatePolicy: "refresh_all",
+  });
   await t.service.task;
   assert.equal(t.extracts, 2);
+  assert.deepEqual(policies, ["refresh_all", "refresh_all"]);
   await t.service.settings({ ...settings, enabled: false, scopes: [] });
   assert.equal(t.extracts, 2);
 });

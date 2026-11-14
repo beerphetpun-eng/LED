@@ -17,6 +17,8 @@ export function SyncPanel({
     [opened, setOpened] = useState<string[]>(["50"]),
     [saving, setSaving] = useState(false),
     [dirty, setDirty] = useState(false);
+  const controlsDisabled = disabled || saving;
+  const duplicatePolicy = draft.duplicatePolicy ?? "skip_unchanged";
   const patch = (p: Partial<Settings>) => {
     setDraft((d) => ({ ...d, ...p }));
     setDirty(true);
@@ -31,11 +33,11 @@ export function SyncPanel({
   }
   const count = draft.scopes.reduce((n, s) => n + s.districtCodes.length, 0);
   return (
-    <section className="sync-panel">
+    <section className="sync-panel" aria-labelledby="sync-scope-title">
       <div className="section-head">
         <div>
           <span className="eyebrow">SYNC SCOPE</span>
-          <h2>เลือกพื้นที่ที่ต้องการติดตาม</h2>
+          <h2 id="sync-scope-title">เลือกพื้นที่ที่ต้องการติดตาม</h2>
           <p>
             ซิงค์ทุกประเภท ราคา และขนาดพื้นที่ในอำเภอที่เลือก
             ข้ามแถวสีแดงตามเดิม
@@ -48,7 +50,7 @@ export function SyncPanel({
           <input
             type="checkbox"
             checked={draft.enabled}
-            disabled={disabled}
+            disabled={controlsDisabled}
             onChange={(e) => patch({ enabled: e.target.checked })}
           />
           ซิงค์อัตโนมัติขณะโปรแกรมเปิด (รวมค้นพิกัดที่ยังขาดทุกวัน)
@@ -57,7 +59,7 @@ export function SyncPanel({
           ความถี่
           <select
             value={draft.intervalHours}
-            disabled={disabled}
+            disabled={controlsDisabled}
             onChange={(e) => patch({ intervalHours: +e.target.value })}
           >
             <option value={1}>ทุก 1 ชั่วโมง</option>
@@ -67,22 +69,34 @@ export function SyncPanel({
           </select>
         </label>
         <label>
-          ข้อยกเว้นการลบข้อมูลหมดอายุ
+          เมื่อพบรายการเดิม
           <select
-            value={draft.retention}
-            disabled={disabled}
-            onChange={(e) => patch({ retention: e.target.value })}
+            value={duplicatePolicy}
+            disabled={controlsDisabled}
+            aria-describedby="duplicate-policy-help"
+            onChange={(e) =>
+              patch({
+                duplicatePolicy:
+                  e.target.value === "refresh_all"
+                    ? "refresh_all"
+                    : "skip_unchanged",
+              })
+            }
           >
-            <option value="engaged">เก็บหากมีบุ๊กมาร์ก ดาว หรือคอมเมนต์</option>
-            <option value="bookmarked">เก็บหากบุ๊กมาร์ก</option>
-            <option value="manual">เก็บเฉพาะที่เลือกห้ามลบอัตโนมัติ</option>
+            <option value="skip_unchanged">
+              ข้ามรายการเดิมที่ข้อมูลครบและไม่เปลี่ยน
+            </option>
+            <option value="refresh_all">
+              ดึงรายละเอียดและภาพใหม่ทุกรายการ
+            </option>
           </select>
+          <small className="hint" id="duplicate-policy-help">
+            {duplicatePolicy === "skip_unchanged"
+              ? "ค่าเริ่มต้น ระบบอ่านหน้ารายการเพื่อเทียบข้อมูล แล้วดึงรายละเอียดและภาพเฉพาะรายการใหม่ รายการที่เปลี่ยน หรือหลักฐานที่ยังไม่ครบ"
+              : "เปิดรายละเอียดและตรวจภาพอีกครั้ง รวมถึงรายการเดิมที่ข้อมูลครบแล้ว รอบซิงค์อาจใช้เวลานานขึ้น"}{" "}
+            ทั้งสองแบบอัปเดตรายการเดิมในคลังและเก็บบุ๊กมาร์ก ดาว และคอมเมนต์ไว้
+          </small>
         </label>
-      </div>
-      <div className="info-note">
-        ลบหลังวันประมูลสุดท้ายครบ 1 เดือนปฏิทิน รวมรูปทั้งหมด
-        โดยเริ่มลบวันถัดจากวันครบกำหนด ทรัพย์ที่เลือก “ห้ามลบอัตโนมัติ”
-        จะเก็บไว้เสมอ หากไม่มีวันประมูลที่อ่านได้ครบ ระบบจะไม่ลบ
       </div>
       <div className="geo-toolbar">
         <label className="search-box">
@@ -95,7 +109,7 @@ export function SyncPanel({
           />
         </label>
         <button
-          disabled={disabled}
+          disabled={controlsDisabled}
           onClick={() =>
             patch({
               scopes: provinces.map((p) => ({
@@ -107,7 +121,10 @@ export function SyncPanel({
         >
           เลือกทุกจังหวัด
         </button>
-        <button disabled={disabled} onClick={() => patch({ scopes: [] })}>
+        <button
+          disabled={controlsDisabled}
+          onClick={() => patch({ scopes: [] })}
+        >
           ล้างการเลือก
         </button>
       </div>
@@ -136,7 +153,7 @@ export function SyncPanel({
                       ref={(el) => {
                         if (el) el.indeterminate = ids.length > 0 && !all;
                       }}
-                      disabled={disabled}
+                      disabled={controlsDisabled}
                       onChange={() =>
                         scope(p.code, all ? [] : p.districts.map((d) => d.code))
                       }
@@ -174,7 +191,7 @@ export function SyncPanel({
                           <input
                             type="checkbox"
                             checked={ids.includes(d.code)}
-                            disabled={disabled}
+                            disabled={controlsDisabled}
                             onChange={() =>
                               scope(
                                 p.code,
@@ -195,9 +212,32 @@ export function SyncPanel({
             );
           })}
       </div>
+      <section
+        className="retention-section"
+        aria-labelledby="sync-retention-title"
+      >
+        <h2 id="sync-retention-title">การลบข้อมูลหมดอายุ</h2>
+        <label>
+          ข้อยกเว้นการลบข้อมูลหมดอายุ
+          <select
+            value={draft.retention}
+            disabled={controlsDisabled}
+            onChange={(e) => patch({ retention: e.target.value })}
+          >
+            <option value="manual">เก็บเฉพาะที่เลือกห้ามลบอัตโนมัติ</option>
+            <option value="bookmarked">เก็บหากบุ๊กมาร์ก</option>
+            <option value="engaged">เก็บหากมีบุ๊กมาร์ก ดาว หรือคอมเมนต์</option>
+          </select>
+        </label>
+        <div className="info-note">
+          ลบข้อมูลและรูปตั้งแต่วันถัดจากวันประมูลสุดท้ายครบ 1 เดือนปฏิทิน
+          เก็บทรัพย์ที่เลือก “ห้ามลบอัตโนมัติ”
+          และทรัพย์ที่ยังอ่านวันประมูลได้ไม่ครบไว้เสมอ
+        </div>
+      </section>
       <div className="save-bar">
         <span>
-          {dirty ? "มีการตั้งค่าที่ยังไม่บันทึก" : "บันทึกขอบเขตปัจจุบันแล้ว"} ·{" "}
+          {dirty ? "มีการตั้งค่าที่ยังไม่บันทึก" : "บันทึกการตั้งค่าแล้ว"} ·{" "}
           {draft.scopes.length} จังหวัด / {count} อำเภอ
         </span>
         <button
