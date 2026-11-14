@@ -1,3 +1,5 @@
+import type { Property } from "./catalog-types";
+
 export async function api<T>(
   url: string,
   method = "GET",
@@ -21,6 +23,27 @@ export const money = (v: number | null) =>
   v === null
     ? "ไม่ระบุ"
     : new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(v);
+const areaNumber = new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 });
+export function mapPinLabel(property: Property) {
+  const { total } = property.pricing;
+  const rounded = total === null ? null : Math.ceil(total / 10_000) * 10_000;
+  const price =
+    rounded === null
+      ? "รอตรวจราคา"
+      : rounded >= 1_000_000
+        ? `${rounded / 1_000_000}m`
+        : `${rounded / 1_000}k`;
+  const area = property.areaSqWa;
+  if (area === null || !Number.isFinite(area)) return price;
+  const condo =
+    property.areaUnit === "sqm" || /ห้องชุด|คอนโด/.test(property.propertyType);
+  const size = condo
+    ? `${areaNumber.format(area * 4)}ตรม`
+    : area >= 400
+      ? `${areaNumber.format(area / 400)} ไร่`
+      : `${areaNumber.format(area)}ตรว`;
+  return `${price} | ${size}`;
+}
 export const time = (v?: string) =>
   v
     ? new Date(v).toLocaleString("th-TH", {

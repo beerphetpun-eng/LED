@@ -98,7 +98,10 @@ export async function setState(key, data) {
     [key, JSON.stringify(data)],
   );
 }
-export const getSettings = () => getState("sync_settings", defaultSettings());
+export async function getSettings() {
+  const defaults = defaultSettings();
+  return { ...defaults, ...(await getState("sync_settings")) };
+}
 export const saveSettings = (value) => setState("sync_settings", value);
 export async function alert(message) {
   await pool.query(

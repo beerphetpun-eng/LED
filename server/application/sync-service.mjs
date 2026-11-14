@@ -190,7 +190,7 @@ export function createSyncService({
     }
     await persist({ geoDone: records.length });
   }
-  async function run(scopes, geoOnly, automatic) {
+  async function run(scopes, geoOnly, automatic, duplicatePolicy) {
     const signal = controller.signal;
     let lookedUp = false;
     try {
@@ -218,6 +218,7 @@ export function createSyncService({
         });
         const job = {
           id: state.runId,
+          duplicatePolicy,
           values: {
             provinces: scope.provinceCode,
             amphurSelect: scope.districtCode,
@@ -526,15 +527,17 @@ export function createSyncService({
           geoTotal: 0,
           captchaUrl: null,
         });
-        service.task = run(scopes, geoOnly, automatic).catch(async (e) => {
-          state = {
-            ...state,
-            status: "failed",
-            message: e.message,
-            captchaUrl: null,
-          };
-          await db.alert("ระบบซิงค์ผิดพลาด: " + e.message).catch(() => {});
-        });
+        service.task = run(scopes, geoOnly, automatic, s.duplicatePolicy).catch(
+          async (e) => {
+            state = {
+              ...state,
+              status: "failed",
+              message: e.message,
+              captchaUrl: null,
+            };
+            await db.alert("ระบบซิงค์ผิดพลาด: " + e.message).catch(() => {});
+          },
+        );
         return service.status();
       } catch (e) {
         running = false;

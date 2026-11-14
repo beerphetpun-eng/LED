@@ -59,6 +59,7 @@ export type Property = {
     mortgageClause: string | null;
   };
   areaSqWa: number | null;
+  areaUnit?: "sqm" | "sqwa";
   areaText: string;
   auctionDates: string[];
   screenshotUrl: string;
@@ -89,6 +90,7 @@ export type Settings = {
   intervalHours: number;
   scopes: { provinceCode: string; districtCodes: string[] }[];
   retention: string;
+  duplicatePolicy?: "skip_unchanged" | "refresh_all";
 };
 export type Runtime = {
   running: boolean;

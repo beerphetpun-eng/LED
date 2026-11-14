@@ -223,10 +223,20 @@ test("source adapter excludes Bootstrap and inline red rows, not ordinary rows",
   }
 });
 
-test("unchanged known properties skip detail navigation and screenshots", async () => {
+test("duplicate policy either reuses complete evidence or refreshes the same listing", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
+    let opens = 0;
+    await page
+      .context()
+      .route("http://fixture.test/asset_open.asp", (route) => {
+        opens++;
+        return route.fulfill({
+          contentType: "text/html; charset=utf-8",
+          body: "<h1>รายการทรัพย์ที่จะขาย</h1><p>โฉนดเลขที่ 123</p><p>01/01/2570</p>",
+        });
+      });
     const cells = [
       "ชม7/2569",
       "1 - 1",
@@ -245,7 +255,7 @@ test("unchanged known properties skip detail navigation and screenshots", async 
         cells
           .map(
             (c, i) =>
-              `<td>${i === 0 ? '<form action="asset_open.asp"></form>' : ""}${c}</td>`,
+              `<td>${i === 0 ? '<form action="http://fixture.test/asset_open.asp" method="post" target="_blank"></form>' : ""}${c}</td>`,
           )
           .join("") +
         "</tr></table>",
@@ -266,11 +276,10 @@ test("unchanged known properties skip detail navigation and screenshots", async 
         led: page,
         verificationCode: async () => "123456",
         submit: async () => {},
-        screenshot: async () => {
-          throw Error("must not download images again");
-        },
+        screenshot: async () => "/evidence/refreshed.png",
       },
       {
+        checkImages: async () => ({ ready: true, total: 1, loaded: 1 }),
         findExisting: async (id) => {
           assert.equal(id, previous.id);
           return previous;
@@ -291,6 +300,29 @@ test("unchanged known properties skip detail navigation and screenshots", async 
     assert.equal(job.extractionComplete, true);
     assert.equal(job.skippedExisting, 1);
     assert.equal(job.properties[0].screenshotUrl, previous.screenshotUrl);
+    assert.equal(opens, 0);
+
+    const refreshed = {
+      ...job,
+      duplicatePolicy: "refresh_all",
+      pages: 0,
+      seen: 0,
+      skippedExisting: 0,
+      properties: [],
+    };
+    await source.extract(
+      refreshed,
+      new AbortController().signal,
+      async () => {},
+    );
+    assert.equal(refreshed.extractionComplete, true);
+    assert.equal(refreshed.skippedExisting, 0);
+    assert.equal(opens, 1);
+    assert.equal(refreshed.properties[0].id, previous.id);
+    assert.equal(
+      refreshed.properties[0].screenshotUrl,
+      "/evidence/refreshed.png",
+    );
   } finally {
     await browser.close();
   }

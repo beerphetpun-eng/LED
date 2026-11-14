@@ -12,6 +12,7 @@ export const emptyUser = () => ({
 export const defaultSettings = () => ({
   enabled: true,
   intervalHours: 168,
+  duplicatePolicy: "skip_unchanged",
   scopes: [{ provinceCode: "50", districtCodes: ["5001"] }],
   retention: "manual",
 });
@@ -142,6 +143,8 @@ export function validateSettings(input, geography) {
     typeof input.enabled !== "boolean" ||
     ![1, 6, 24, 168].includes(input.intervalHours) ||
     !["engaged", "bookmarked", "manual"].includes(input.retention) ||
+    (input.duplicatePolicy !== undefined &&
+      !["skip_unchanged", "refresh_all"].includes(input.duplicatePolicy)) ||
     !Array.isArray(input.scopes)
   )
     throw Error("การตั้งค่าซิงค์ไม่ถูกต้อง");
@@ -171,6 +174,7 @@ export function validateSettings(input, geography) {
     enabled: input.enabled,
     intervalHours: input.intervalHours,
     retention: input.retention,
+    duplicatePolicy: input.duplicatePolicy ?? "skip_unchanged",
     scopes,
   };
 }

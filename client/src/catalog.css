@@ -487,8 +487,8 @@ a {
   color: white;
   border: 2px solid white;
   border-radius: 7px;
-  padding: 7px 8px;
-  font-size: 10px;
+  padding: 5px 6px;
+  font-size: 11px;
   font-weight: 600;
   box-shadow: 0 3px 8px #0003;
   text-align: center;
@@ -721,6 +721,21 @@ footer {
   font-size: 12px;
   line-height: 1.9;
   color: #829171;
+}
+.retention-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 26px;
+  padding: 18px;
+  border: 1px solid #e0e6d8;
+  border-radius: 12px;
+}
+.retention-section h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.retention-section label {
+  max-width: 440px;
 }
 .geo-toolbar {
   display: flex;

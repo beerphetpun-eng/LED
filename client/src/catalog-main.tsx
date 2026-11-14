@@ -27,7 +27,7 @@ import type {
   Province,
   UserNotes,
 } from "./catalog-types";
-import { api, money, time } from "./catalog-api";
+import { api, mapPinLabel, money, time } from "./catalog-api";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
 import { AlertMenu } from "./AlertMenu";
@@ -726,6 +726,8 @@ function App() {
                   {pins.map(({ p, v }) => {
                     const pinKey = `${p.id}:${v.deed}`;
                     const highlighted = highlightedPin === pinKey;
+                    const label = document.createElement("span");
+                    label.textContent = mapPinLabel(p);
                     return (
                       <Marker
                         key={pinKey}
@@ -736,9 +738,9 @@ function App() {
                           className: highlighted
                             ? "price-marker highlighted"
                             : "price-marker",
-                          html: `<span>${p.pricing.total === null ? "รอตรวจราคา" : `฿ ${money(p.pricing.total)}`}</span>`,
-                          iconSize: [105, 35],
-                          iconAnchor: [52, 35],
+                          html: label,
+                          iconSize: [116, 30],
+                          iconAnchor: [58, 30],
                         })}
                         eventHandlers={{
                           click: () => {
