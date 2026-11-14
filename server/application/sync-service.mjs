@@ -555,7 +555,10 @@ export function createSyncService({
         else if (due(state.geoRetryAt || state.nextGeoRunAt))
           await service.start(true, true);
       } catch (e) {
-        await db.alert(e.message);
+        await db.alert(e.message).catch((alertError) => {
+          console.error("Scheduled sync failed:", e);
+          console.error("Could not save scheduled sync alert:", alertError);
+        });
       } finally {
         ticking = false;
       }

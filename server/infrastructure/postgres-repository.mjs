@@ -34,6 +34,9 @@ export const pool = new pg.Pool({
   password: settings.password,
   max: 4,
 });
+pool.on("error", (error) => {
+  console.error("Idle PostgreSQL connection failed:", error);
+});
 export async function init() {
   await pool.query(`CREATE SCHEMA IF NOT EXISTS land_radar;
 CREATE TABLE IF NOT EXISTS land_radar.bookmarks(id uuid PRIMARY KEY,data jsonb NOT NULL);
