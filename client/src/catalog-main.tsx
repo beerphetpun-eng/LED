@@ -305,8 +305,8 @@ function App() {
   const confirmedPins = pins.filter(({ area }) => !area);
   const confirmedCount = new Set(confirmedPins.map(({ p }) => p.id)).size;
   const approximateCount = pins.length - confirmedPins.length;
-  const withoutPinCount =
-    library.items.length - confirmedCount - approximateCount;
+  const pendingLocationCount = library.items.length - confirmedCount;
+  const withoutPinCount = pendingLocationCount - approximateCount;
   const field = (
     label: string,
     key: string,
@@ -677,6 +677,10 @@ function App() {
                   <dt>มีพิกัดยืนยัน</dt>
                   <dd>{confirmedCount}</dd>
                 </div>
+                <div title="ทรัพย์ที่ยังไม่มีพิกัดยืนยัน รวมหมุดโดยประมาณและทรัพย์ที่ยังไม่มีหมุด">
+                  <dt>รอดำเนินการ</dt>
+                  <dd>{pendingLocationCount}</dd>
+                </div>
                 <div>
                   <dt>พิกัดโดยประมาณ</dt>
                   <dd>{approximateCount}</dd>
@@ -702,10 +706,6 @@ function App() {
                   </select>
                 </label>
               )}
-              <p className="location-note">
-                ยังไม่มีพิกัดยืนยัน {approximateCount + withoutPinCount} รายการ
-                รวมทั้งทรัพย์ที่แสดงหมุดโดยประมาณ
-              </p>
             </div>
             <section
               id="property-map"
