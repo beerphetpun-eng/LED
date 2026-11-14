@@ -1,4 +1,4 @@
-import type { Property } from "./catalog-types";
+import type { Parcel, Property } from "./catalog-types";
 
 export async function api<T>(
   url: string,
@@ -24,6 +24,26 @@ export const money = (v: number | null) =>
     ? "ไม่ระบุ"
     : new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(v);
 const areaNumber = new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 });
+const isCondo = (property: Property) =>
+  property.areaUnit === "sqm" || /ห้องชุด|คอนโด/.test(property.propertyType);
+
+type LocatedParcel = Parcel & { latitude: number; longitude: number };
+
+export function mapParcels(property: Property): LocatedParcel[] {
+  const located = property.parcels.filter(
+    (parcel): parcel is LocatedParcel =>
+      Number.isFinite(parcel.latitude) && Number.isFinite(parcel.longitude),
+  );
+  if (!isCondo(property) || located.length < 2) return located;
+
+  const byDeed = new Map(located.map((parcel) => [parcel.deed, parcel]));
+  const first = property.deed
+    .split(",")
+    .map((deed) => byDeed.get(deed.trim()))
+    .find(Boolean);
+  return [first ?? located[0]];
+}
+
 export function mapPinLabel(property: Property) {
   const { total } = property.pricing;
   const rounded = total === null ? null : Math.ceil(total / 10_000) * 10_000;
@@ -35,9 +55,7 @@ export function mapPinLabel(property: Property) {
         : `${rounded / 1_000}k`;
   const area = property.areaSqWa;
   if (area === null || !Number.isFinite(area)) return price;
-  const condo =
-    property.areaUnit === "sqm" || /ห้องชุด|คอนโด/.test(property.propertyType);
-  const size = condo
+  const size = isCondo(property)
     ? `${areaNumber.format(Math.trunc(area * 4))}ตรม`
     : area >= 400
       ? `${areaNumber.format(area / 400)} ไร่`

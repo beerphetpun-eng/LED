@@ -27,7 +27,7 @@ import type {
   Province,
   UserNotes,
 } from "./catalog-types";
-import { api, mapPinLabel, money, time } from "./catalog-api";
+import { api, mapParcels, mapPinLabel, money, time } from "./catalog-api";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
 import { AlertMenu } from "./AlertMenu";
@@ -40,14 +40,14 @@ const emptyLibrary: Library = {
   facets: { provinces: [], districts: [], types: [], maxPrice: 0, maxRai: 0 },
 };
 function ViewMap({
-  items,
+  coordinates,
   full,
   visible,
   selected,
   focusSelected,
   onBackgroundClick,
 }: {
-  items: Property[];
+  coordinates: L.LatLngTuple[];
   full: boolean;
   visible: boolean;
   selected: Property | null;
@@ -55,11 +55,6 @@ function ViewMap({
   onBackgroundClick: () => void;
 }) {
   const map = useMapEvents({ click: onBackgroundClick });
-  const coordinates = items.flatMap((p) =>
-    p.parcels
-      .filter((v) => v.latitude !== null && v.longitude !== null)
-      .map((v) => [v.latitude!, v.longitude!] as [number, number]),
-  );
   const key = JSON.stringify(coordinates);
   const fittedView = useRef("");
   useEffect(() => {
@@ -84,10 +79,8 @@ function ViewMap({
   }, [key, full, visible, selected?.id]);
   useEffect(() => {
     if (!focusSelected || !visible) return;
-    const p = selected?.parcels.find(
-      (v) => v.latitude !== null && v.longitude !== null,
-    );
-    if (p) map.flyTo([p.latitude!, p.longitude!], 16);
+    const p = selected && mapParcels(selected)[0];
+    if (p) map.flyTo([p.latitude, p.longitude], 16);
   }, [selected?.id, focusSelected, visible]);
   return null;
 }
@@ -296,14 +289,10 @@ function App() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const mapped = library.items.filter((p) =>
-      p.parcels.some((v) => v.latitude !== null && v.longitude !== null),
-    ),
-    pins = mapped.flatMap((p) =>
-      p.parcels
-        .filter((v) => v.latitude !== null && v.longitude !== null)
-        .map((v) => ({ p, v })),
-    );
+  const pins = library.items.flatMap((p) =>
+    mapParcels(p).map((v) => ({ p, v })),
+  );
+  const mappedCount = new Set(pins.map(({ p }) => p.id)).size;
   const field = (
     label: string,
     key: string,
@@ -667,7 +656,7 @@ function App() {
                 </div>
                 <div>
                   <dt>ทรัพย์มีพิกัด</dt>
-                  <dd>{mapped.length}</dd>
+                  <dd>{mappedCount}</dd>
                 </div>
                 <div>
                   <dt>หมุด</dt>
@@ -719,7 +708,7 @@ function App() {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
                   />
                   <ViewMap
-                    items={library.items}
+                    coordinates={pins.map(({ v }) => [v.latitude, v.longitude])}
                     full={full}
                     visible={view === "map" && tab === "explore"}
                     selected={selected}
@@ -734,7 +723,7 @@ function App() {
                     return (
                       <Marker
                         key={pinKey}
-                        position={[v.latitude!, v.longitude!]}
+                        position={[v.latitude, v.longitude]}
                         zIndexOffset={highlighted ? 1000 : 0}
                         autoPanOnFocus={false}
                         bubblingMouseEvents={false}
