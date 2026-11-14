@@ -9,7 +9,8 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import type { Property, UserNotes } from "./catalog-types";
-import { money, time, today, auctionDay } from "./catalog-api";
+import { mapParcels, money, time, today, auctionDay } from "./catalog-api";
+import { approximateLocation } from "./approximate-location";
 
 function EvidenceStatus({ property }: { property: Property }) {
   const images = property.evidenceImages;
@@ -97,6 +98,7 @@ export function PropertyDetails({
       setSavingComment(false);
     }
   }
+  const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const next = p.auctionDates
     .map(auctionDay)
     .filter((d) => d >= today())
@@ -405,6 +407,12 @@ export function PropertyDetails({
               </section>
             )}
             <h3>หลักฐาน LandsMaps</h3>
+            {estimate && (
+              <p className="info-note">
+                พิกัดโดยประมาณอิงพื้นที่ {estimate.area}{" "}
+                ตำแหน่งแปลงยังไม่ได้รับการยืนยัน
+              </p>
+            )}
             {p.parcels.length === 0 && (
               <p className="muted">ยังไม่มีพิกัดที่ยืนยันได้</p>
             )}

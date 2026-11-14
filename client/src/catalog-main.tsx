@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import {
   Compass,
@@ -27,7 +27,9 @@ import type {
   Province,
   UserNotes,
 } from "./catalog-types";
-import { api, mapParcels, mapPinLabel, money, time } from "./catalog-api";
+import { api, mapParcels, money, time } from "./catalog-api";
+import { approximateLocation } from "./approximate-location";
+import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
 import { AlertMenu } from "./AlertMenu";
@@ -79,8 +81,10 @@ function ViewMap({
   }, [key, full, visible, selected?.id]);
   useEffect(() => {
     if (!focusSelected || !visible) return;
-    const p = selected && mapParcels(selected)[0];
-    if (p) map.flyTo([p.latitude, p.longitude], 16);
+    if (!selected) return;
+    const exact = mapParcels(selected)[0];
+    const point = exact ?? approximateLocation(selected);
+    if (point) map.flyTo([point.latitude, point.longitude], exact ? 16 : 12);
   }, [selected?.id, focusSelected, visible]);
   return null;
 }
@@ -289,10 +293,18 @@ function App() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const pins = library.items.flatMap((p) =>
-    mapParcels(p).map((v) => ({ p, v })),
-  );
-  const mappedCount = new Set(pins.map(({ p }) => p.id)).size;
+  const pins = library.items.flatMap<PropertyPin>((p) => {
+    const exact = mapParcels(p);
+    if (exact.length)
+      return exact.map((v) => ({ p, v, key: `${p.id}:${v.deed}`, area: "" }));
+    const estimate = approximateLocation(p);
+    return estimate
+      ? [{ p, v: estimate, key: `${p.id}:approximate`, area: estimate.area }]
+      : [];
+  });
+  const mappedCount = new Set(
+    pins.filter(({ area }) => !area).map(({ p }) => p.id),
+  ).size;
   const field = (
     label: string,
     key: string,
@@ -715,42 +727,20 @@ function App() {
                     focusSelected={focusSelected}
                     onBackgroundClick={closeDetails}
                   />
-                  {pins.map(({ p, v }) => {
-                    const pinKey = `${p.id}:${v.deed}`;
-                    const highlighted = highlightedPin === pinKey;
-                    const label = document.createElement("span");
-                    label.textContent = mapPinLabel(p);
-                    return (
-                      <Marker
-                        key={pinKey}
-                        position={[v.latitude, v.longitude]}
-                        zIndexOffset={highlighted ? 1000 : 0}
-                        autoPanOnFocus={false}
-                        bubblingMouseEvents={false}
-                        icon={L.divIcon({
-                          className: highlighted
-                            ? "price-marker highlighted"
-                            : "price-marker",
-                          html: label,
-                          iconSize: [116, 30],
-                          iconAnchor: [58, 30],
-                        })}
-                        eventHandlers={{
-                          click: () => {
-                            setHighlightedPin(pinKey);
-                            void select(p, false).catch(() => {});
-                          },
-                        }}
-                      />
-                    );
-                  })}
+                  <PropertyMarkers
+                    pins={pins}
+                    highlightedPin={highlightedPin}
+                    onSelect={({ key, p }) => {
+                      setHighlightedPin(key);
+                      void select(p, false).catch(() => {});
+                    }}
+                  />
                 </MapContainer>
                 {!pins.length && (
                   <div className="map-empty">
                     {library.items.length
                       ? "เปิดแท็บรายการทรัพย์เพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
                       : "ผลค้นหาจะแสดงบนแผนที่นี้"}
-                    <small>ปักหมุดเฉพาะพิกัดที่ค้นพบจริงจาก LandsMaps</small>
                   </div>
                 )}
               </div>
