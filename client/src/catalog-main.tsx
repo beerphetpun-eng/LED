@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import {
   Compass,
@@ -45,14 +45,16 @@ function ViewMap({
   visible,
   selected,
   focusSelected,
+  onBackgroundClick,
 }: {
   items: Property[];
   full: boolean;
   visible: boolean;
   selected: Property | null;
   focusSelected: boolean;
+  onBackgroundClick: () => void;
 }) {
-  const map = useMap();
+  const map = useMapEvents({ click: onBackgroundClick });
   const coordinates = items.flatMap((p) =>
     p.parcels
       .filter((v) => v.latitude !== null && v.longitude !== null)
@@ -722,6 +724,7 @@ function App() {
                     visible={view === "map" && tab === "explore"}
                     selected={selected}
                     focusSelected={focusSelected}
+                    onBackgroundClick={closeDetails}
                   />
                   {pins.map(({ p, v }) => {
                     const pinKey = `${p.id}:${v.deed}`;
@@ -734,6 +737,7 @@ function App() {
                         position={[v.latitude!, v.longitude!]}
                         zIndexOffset={highlighted ? 1000 : 0}
                         autoPanOnFocus={false}
+                        bubblingMouseEvents={false}
                         icon={L.divIcon({
                           className: highlighted
                             ? "price-marker highlighted"
