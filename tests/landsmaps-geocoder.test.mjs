@@ -2,6 +2,41 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
 import { waitForDistrict } from "../server/infrastructure/landsmaps-geocoder.mjs";
+import { registerLandsOverlays } from "../server/infrastructure/browser-service.mjs";
+
+test("LandsMaps overlay handlers tolerate a failed dismiss without rejecting", async () => {
+  const handlers = [];
+  const news = {
+    first() {
+      return this;
+    },
+  };
+  const cookies = {
+    first() {
+      return this;
+    },
+  };
+  await registerLandsOverlays({
+    locator: () => ({ getByRole: () => news }),
+    getByRole: () => cookies,
+    addLocatorHandler: async (control, handler) =>
+      handlers.push({ control, handler }),
+  });
+  assert.deepEqual(
+    handlers.map(({ control }) => control),
+    [news, cookies],
+  );
+  for (const { handler } of handlers) {
+    let attempts = 0;
+    await handler({
+      click: async () => {
+        attempts++;
+        throw Error("ปุ่มหายไประหว่างกด");
+      },
+    });
+    assert.equal(attempts, 1);
+  }
+});
 test("district selection waits for the requested province's asynchronously loaded options", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
