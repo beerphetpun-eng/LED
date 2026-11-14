@@ -129,6 +129,28 @@ test("scheduler processes all scopes without waiting for user input", async () =
   assert.equal(t.service.running, false);
 });
 
+test("scheduler survives a failure to save its error alert", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const fixture = setup();
+  const { service, options } = fixture;
+  await service.init();
+  const getSettings = options.repository.getSettings;
+  options.repository.getSettings = async () => {
+    throw Error("database disconnected");
+  };
+  options.repository.alert = async () => {
+    throw Error("alert insert failed");
+  };
+  await service.tick();
+  assert.equal(console.error.mock.callCount(), 2);
+  assert.equal(fixture.extracts, 0);
+  options.repository.getSettings = getSettings;
+  await service.tick();
+  await service.task;
+  assert.equal(fixture.extracts, 2);
+  assert.equal(service.status().status, "completed");
+});
+
 test("photo refresh targets incomplete components and only patches evidence", async () => {
   const t = setup();
   const old = {

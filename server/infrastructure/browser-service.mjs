@@ -66,7 +66,12 @@ export class BrowserService {
       });
       this.led.on("dialog", async (d) => {
         this.lastDialog = d.message();
-        await d.dismiss();
+        try {
+          await d.dismiss();
+        } catch (error) {
+          if (!this.led?.isClosed())
+            console.error("Could not dismiss LED dialog:", error.message);
+        }
       });
     }
   }

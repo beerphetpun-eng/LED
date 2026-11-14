@@ -6,6 +6,8 @@ React + PostgreSQL workspace for tracking LED auction properties locally at **ht
 
 ดับเบิลคลิก `Start.cmd` และเปิด http://127.0.0.1:5080 เก็บหน้าต่างโปรแกรมไว้ระหว่างใช้งาน กด Ctrl+C เพื่อหยุด หลังแก้ frontend ใช้ `Start.cmd --build` โดยหยุดโปรแกรมเดิมก่อน
 
+เมื่อเซิร์ฟเวอร์ล้ม ตัวเปิดโปรแกรมจะเริ่มเซิร์ฟเวอร์ใหม่โดยอัตโนมัติ เว้นช่วง 1–30 วินาทีเมื่อเกิดซ้ำ และบันทึกสาเหตุไว้ที่ `server/data/land-radar-supervisor.log` การกด Ctrl+C จะหยุดโปรแกรมตามปกติ หากปิดหน้าต่างตัวเปิดโปรแกรมหรือรีสตาร์ตเครื่อง ให้เปิด `Start.cmd` อีกครั้ง
+
 เครื่องนี้ใช้ฐานข้อมูล `led_radar` / schema `land_radar` รหัสอยู่ใน `server/appsettings.Local.json` ซึ่งไม่รวมใน Git ภาพอยู่ใน `server/data/evidence/` ให้สำรองฐานข้อมูลและภาพคู่กัน
 
 ## สองชุดตัวกรอง

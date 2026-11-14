@@ -1,7 +1,14 @@
-import { existsSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  statSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { spawnSync, execFile } from "node:child_process";
+import { superviseServer } from "./scripts/supervise-server.mjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const noBrowser = process.argv.includes("--no-browser"),
   build = process.argv.includes("--build");
@@ -50,4 +57,31 @@ run(
   ["node_modules/playwright/cli.js", "install", "chromium"],
   server,
 );
-run(process.execPath, ["app.mjs", ...(noBrowser ? [] : ["--open"])], server);
+const data = path.join(server, "data");
+const logFile = path.join(data, "land-radar-supervisor.log");
+function log(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.log(line.split("\n", 1)[0]);
+  try {
+    mkdirSync(data, { recursive: true });
+    if (existsSync(logFile) && statSync(logFile).size >= 1024 * 1024)
+      renameSync(
+        logFile,
+        path.join(data, "land-radar-supervisor.previous.log"),
+      );
+    appendFileSync(logFile, line + "\n");
+  } catch (error) {
+    console.error("Could not write server lifecycle log:", error.message);
+  }
+}
+
+const shutdown = new AbortController();
+const stop = () => shutdown.abort();
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
+await superviseServer(path.join(server, "app.mjs"), {
+  cwd: server,
+  args: noBrowser ? [] : ["--open"],
+  signal: shutdown.signal,
+  log,
+});

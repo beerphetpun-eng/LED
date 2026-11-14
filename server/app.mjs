@@ -33,7 +33,8 @@ const app = createCatalogHttp({
   root,
   evidencePath,
 });
-const server = app.listen(5080, "127.0.0.1", () => {
+const server = app.listen(5080, "127.0.0.1", (error) => {
+  if (error) throw error;
   console.log("Land Radar: http://127.0.0.1:5080");
   sync.schedule();
   if (process.argv.includes("--open"))
@@ -57,3 +58,7 @@ async function stop() {
 }
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
+if (process.send)
+  process.on("message", (message) => {
+    if (message === "shutdown") void stop();
+  });
