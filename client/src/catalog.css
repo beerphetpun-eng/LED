@@ -419,12 +419,6 @@ a {
   padding-inline-start: 10px;
   border-inline-start: 2px solid #d4decd;
 }
-.location-note {
-  flex-basis: 100%;
-  margin: 0;
-  color: #52604f;
-  font-size: 11px;
-}
 .map-shell {
   height: 100%;
   position: relative;
