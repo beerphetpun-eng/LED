@@ -41,7 +41,7 @@ export function mapPinLabel(property: Property) {
     ? `${areaNumber.format(area * 4)}ตรม`
     : area >= 400
       ? `${areaNumber.format(area / 400)} ไร่`
-      : `${areaNumber.format(area)}ตรว`;
+      : `${areaNumber.format(Math.trunc(area))}ตรว`;
   return `${price} | ${size}`;
 }
 export const time = (v?: string) =>
