@@ -25,6 +25,8 @@ export function missingParcelDeeds(property) {
           (p) =>
             p.deed === deed &&
             p.status === "located" &&
+            Number.isFinite(p.latitude) &&
+            Number.isFinite(p.longitude) &&
             p.mapEvidenceUrl &&
             p.backgroundReady !== false,
         ),
@@ -73,7 +75,7 @@ export function bangkokDay(now = new Date()) {
   return new Date(now.getTime() + 7 * 3600000).toISOString().slice(0, 10);
 }
 export function expiryDay(dates) {
-  if (!dates?.length) return null;
+  if (!Array.isArray(dates) || !dates.length) return null;
   const parsed = dates.map(auctionISO);
   if (parsed.some((v) => !v)) return null; // Incomplete/invalid dates must never trigger deletion.
   const [y, m, d] = parsed.sort().at(-1).split("-").map(Number);
@@ -85,16 +87,22 @@ export function shouldExpire(
   retention = "manual",
   today = bangkokDay(),
 ) {
-  const u = property.user || emptyUser();
+  const u = { ...emptyUser(), ...property.user };
   if (
     u.protected ||
     (retention === "bookmarked" && u.bookmarked) ||
     (retention === "engaged" &&
-      (u.bookmarked || u.stars > 0 || u.comment.trim()))
+      (u.bookmarked || u.stars > 0 || u.comment?.trim()))
   )
     return false;
-  const expires = expiryDay(property.auctionDates);
-  return !!expires && today > expires;
+  const schedules = [
+    property.auctionDates,
+    ...(property.assetComponents || []).map((part) => part.auctionDates),
+  ];
+  return schedules.every((dates) => {
+    const expires = expiryDay(dates);
+    return !!expires && today > expires;
+  });
 }
 export function validateUser(input) {
   if (!input || typeof input !== "object")
@@ -140,7 +148,9 @@ export function validateSettings(input, geography) {
   const scopes = [],
     seen = new Set();
   for (const s of input.scopes) {
-    const province = geography.provinces.find((p) => p.code === s.provinceCode);
+    const province = geography.provinces.find(
+      (p) => p.code === s?.provinceCode,
+    );
     if (
       !province ||
       seen.has(s.provinceCode) ||
@@ -173,11 +183,15 @@ export function filterProperties(items, f = {}) {
       throw Error("ตัวกรองตัวเลขไม่ถูกต้อง: " + key);
     return n;
   };
+  if (Object.values(f).some((value) => typeof value !== "string"))
+    throw Error("แต่ละตัวกรองต้องระบุค่าเดียว");
   const min = numeric("minPrice"),
     max = numeric("maxPrice"),
     areaMin = numeric("minRai"),
     areaMax = numeric("maxRai"),
     stars = numeric("stars");
+  if (stars !== null && (!Number.isInteger(stars) || stars > 5))
+    throw Error("ดาวต้องเป็น 0–5");
   if (
     (min !== null && max !== null && min > max) ||
     (areaMin !== null && areaMax !== null && areaMin > areaMax)

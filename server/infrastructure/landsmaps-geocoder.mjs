@@ -64,12 +64,14 @@ export function createLandsMapsGeocoder(browser) {
         Array.from(e.options).map((o) => ({ value: o.value, label: o.text })),
       );
   async function locate(record, deed, jobId, signal) {
-    const page = await browser.landsPage();
+    let page;
     // A fresh document clears stale results. No direct API calls or authentication bypass.
     try {
+      page = await browser.landsPage();
       await page.goto(LANDS, { waitUntil: "commit", timeout: 30000 });
       await page
-        .locator('#cbprovince option[value="50"]')
+        .locator('#cbprovince option[value]:not([value=""]):not([value="0"])')
+        .first()
         .waitFor({ state: "attached", timeout: 120000 });
     } catch (cause) {
       signal.throwIfAborted();

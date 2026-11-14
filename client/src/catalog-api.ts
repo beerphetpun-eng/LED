@@ -8,8 +8,11 @@ export async function api<T>(
     method,
     headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
+    signal:
+      signal ?? (method === "GET" ? AbortSignal.timeout(15_000) : undefined),
   });
+  if (!r.headers.get("content-type")?.includes("application/json"))
+    throw Error(`เชื่อมต่อ Land Radar ไม่สำเร็จ (HTTP ${r.status})`);
   const data = await r.json();
   if (!r.ok) throw Error(data.error || "เชื่อมต่อไม่สำเร็จ");
   return data;

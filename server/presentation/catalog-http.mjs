@@ -10,6 +10,11 @@ export function createCatalogHttp({
 }) {
   const app = express();
   app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    if (!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(req.get("Host") || ""))
+      return res.status(403).json({ error: "เปิด Land Radar ผ่าน localhost" });
+    next();
+  });
   app.use(express.json({ limit: "150kb" }));
   app.use("/api", (req, res, next) => {
     res.set("Cache-Control", "no-store");
@@ -27,8 +32,17 @@ export function createCatalogHttp({
     next();
   });
   app.get("/api/health", async (req, res) => {
-    await db.health();
-    res.json({ status: "ok", source: "LED + LandsMaps", version: 2 });
+    try {
+      await db.health();
+      res.json({ status: "ok", source: "LED + LandsMaps", version: 2 });
+    } catch {
+      res.status(503).json({
+        status: "unavailable",
+        source: "LED + LandsMaps",
+        version: 2,
+        error: "เชื่อมต่อฐานข้อมูลไม่สำเร็จ",
+      });
+    }
   });
   app.get("/api/geography", (req, res) => res.json(geography));
   app.get("/api/sync", async (req, res) =>
@@ -78,7 +92,7 @@ export function createCatalogHttp({
   app.post("/api/properties/:propertyId/facebook", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     if (!p) throw Error("ไม่พบทรัพย์");
-    const days = Number(req.body.nearbyDays ?? 7);
+    const days = req.body?.nearbyDays ?? 7;
     if (![0, 3, 7, 14].includes(days))
       throw Error("เลือกช่วงวัน 0, 3, 7 หรือ 14 วัน");
     const result = await facebook.search(p, days);
@@ -98,11 +112,16 @@ export function createCatalogHttp({
     res.sendFile(path.join(root, "wwwroot", "index.html")),
   );
   app.use((e, req, res, next) => {
+    if (res.headersSent) return next(e);
+    if (e.type === "entity.parse.failed")
+      return res.status(400).json({ error: "ข้อมูล JSON ไม่ถูกต้อง" });
+    if (e.type === "entity.too.large")
+      return res.status(413).json({ error: "ข้อมูลที่ส่งมีขนาดใหญ่เกินไป" });
     const message = /password|postgres/i.test(e.message)
       ? "เชื่อมต่อฐานข้อมูลไม่สำเร็จ"
       : String(e.message).split("\n")[0];
     void db.alert(message).catch(() => {});
-    if (!res.headersSent) res.status(400).json({ error: message });
+    res.status(400).json({ error: message });
   });
   return app;
 }

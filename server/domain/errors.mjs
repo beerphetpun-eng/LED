@@ -25,7 +25,8 @@ export function checkLandsSearchResponse(payload, httpStatus = 200) {
     );
   if (
     httpStatus >= 400 ||
-    (payload?.error === true && !/ไม่พบข้อมูล|not found/i.test(message))
+    typeof payload?.error !== "boolean" ||
+    (payload.error && !/ไม่พบข้อมูล|not found/i.test(message))
   )
     throw new SourceUnavailableError(
       `LandsMaps ค้นหาไม่สำเร็จ: ${message || `HTTP ${httpStatus}`}`,

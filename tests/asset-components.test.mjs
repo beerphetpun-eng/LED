@@ -9,6 +9,7 @@ test("bundled rooms retain distinct evidence without multiplying the auction pri
     id: "auction",
     rawText: "detail",
     deed: "123",
+    auctionDates: ["01/01/2570"],
     province: "A",
     district: "B",
     subdistrict: "C",
@@ -30,6 +31,7 @@ test("bundled rooms retain distinct evidence without multiplying the auction pri
   };
   const second = {
     ...base,
+    auctionDates: ["01/01/2570", "15/01/2570"],
     componentKey: componentKey({
       sourceAssetId: "one",
       address: "102",
@@ -44,6 +46,7 @@ test("bundled rooms retain distinct evidence without multiplying the auction pri
   assert.equal(combined.areaSqWa, 20);
   assert.match(combined.areaText, /80/);
   assert.equal(combined.deed, "123");
+  assert.deepEqual(combined.auctionDates, ["01/01/2570", "15/01/2570"]);
   combined = mergeComponents(combined, {
     ...first,
     screenshotUrl: "/evidence/refreshed.png",

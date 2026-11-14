@@ -13,6 +13,16 @@ export function componentKey(identity) {
         .slice(0, 20)
     : "primary";
 }
+export function combinedAuctionDates(property) {
+  const dates = (item) =>
+    Array.isArray(item.auctionDates) ? item.auctionDates : [];
+  return [
+    ...new Set([
+      ...dates(property),
+      ...(property.assetComponents || []).flatMap(dates),
+    ]),
+  ];
+}
 export function mergeComponents(previous, incoming) {
   if (!incoming.componentKey || !incoming.rawText || !incoming.screenshotUrl)
     return incoming;
@@ -40,11 +50,13 @@ export function mergeComponents(previous, incoming) {
     ? values.reduce((n, c) => n + c.areaSqWa, 0)
     : null;
   const allSqm = values.every((c) => c.areaUnit === "sqm");
+  const auctionDates = combinedAuctionDates({ assetComponents: values });
   return {
     ...incoming,
     assetComponents: values,
     deed: deeds.join(", "),
     areaSqWa: total,
+    auctionDates,
     areaText:
       values.length === 1
         ? component.areaText

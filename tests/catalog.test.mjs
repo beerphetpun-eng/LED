@@ -78,6 +78,20 @@ test("retention follows calendar month, Thai day and strict after-date boundary"
   assert.equal(expiryDay(["08/04/2570", "bad"]), null);
   assert.equal(shouldExpire({ auctionDates: [] }), false);
 });
+test("bundle retention waits for every component, including older saved bundles", () => {
+  const property = {
+    auctionDates: ["01/01/2569"],
+    assetComponents: [
+      { auctionDates: ["01/01/2569"] },
+      { auctionDates: ["10/03/2569"] },
+    ],
+  };
+  assert.equal(shouldExpire(property, "manual", "2026-04-10"), false);
+  assert.equal(shouldExpire(property, "manual", "2026-04-11"), true);
+  property.assetComponents[1].auctionDates = [];
+  assert.equal(shouldExpire(property, "manual", "2026-04-11"), false);
+});
+
 test("deletion exemptions are explicit and preserve user work", () => {
   const p = { auctionDates: ["01/01/2560"], user: emptyUser() };
   for (const patch of [

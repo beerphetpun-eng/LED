@@ -24,3 +24,12 @@ test("HTTP 200 quota responses are never classified as missing parcels", () => {
     SourceUnavailableError,
   );
 });
+
+test("an unrecognized response is a source failure, never a parcel miss", () => {
+  for (const response of [null, {}, [], { error: "false" }])
+    assert.throws(
+      () => checkLandsSearchResponse(response),
+      SourceUnavailableError,
+    );
+  assert.doesNotThrow(() => checkLandsSearchResponse({ error: false }));
+});
