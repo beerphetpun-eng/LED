@@ -28,7 +28,7 @@ import type {
   UserNotes,
 } from "./catalog-types";
 import { api, mapParcels, money, time } from "./catalog-api";
-import { approximateLocation } from "./approximate-location";
+import { approximateLocation, mapLocationLabel } from "./approximate-location";
 import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
@@ -302,9 +302,11 @@ function App() {
       ? [{ p, v: estimate, key: `${p.id}:approximate`, area: estimate.area }]
       : [];
   });
-  const mappedCount = new Set(
-    pins.filter(({ area }) => !area).map(({ p }) => p.id),
-  ).size;
+  const confirmedPins = pins.filter(({ area }) => !area);
+  const confirmedCount = new Set(confirmedPins.map(({ p }) => p.id)).size;
+  const approximateCount = pins.length - confirmedPins.length;
+  const withoutPinCount =
+    library.items.length - confirmedCount - approximateCount;
   const field = (
     label: string,
     key: string,
@@ -654,25 +656,34 @@ function App() {
                   aria-controls="property-list"
                   onClick={() => setView("list")}
                 >
-                  รายการทรัพย์ <span>{library.items.length}</span>
+                  รายการทรัพย์
                 </button>
               </div>
               <dl className="stats" aria-label="สรุปผลค้นหา">
                 <div>
-                  <dt>ทั้งหมด</dt>
+                  <dt>ทรัพย์ทั้งหมดในคลัง</dt>
                   <dd>{library.total}</dd>
                 </div>
                 <div>
-                  <dt>ตรงตัวกรอง</dt>
+                  <dt>ทรัพย์ตรงตัวกรอง</dt>
                   <dd>{library.items.length}</dd>
                 </div>
+              </dl>
+              <dl
+                className="stats location-stats"
+                aria-label="พิกัดของทรัพย์ตรงตัวกรอง"
+              >
                 <div>
-                  <dt>ทรัพย์มีพิกัด</dt>
-                  <dd>{mappedCount}</dd>
+                  <dt>มีพิกัดยืนยัน</dt>
+                  <dd>{confirmedCount}</dd>
                 </div>
                 <div>
-                  <dt>หมุด</dt>
-                  <dd>{pins.length}</dd>
+                  <dt>พิกัดโดยประมาณ</dt>
+                  <dd>{approximateCount}</dd>
+                </div>
+                <div>
+                  <dt>ยังไม่มีหมุด</dt>
+                  <dd>{withoutPinCount}</dd>
                 </div>
               </dl>
               {view === "list" && (
@@ -691,6 +702,10 @@ function App() {
                   </select>
                 </label>
               )}
+              <p className="location-note">
+                ยังไม่มีพิกัดยืนยัน {approximateCount + withoutPinCount} รายการ
+                รวมทั้งทรัพย์ที่แสดงหมุดโดยประมาณ
+              </p>
             </div>
             <section
               id="property-map"
@@ -701,7 +716,11 @@ function App() {
               <div className={full ? "map-shell expanded" : "map-shell"}>
                 <div className="map-label">
                   <MapPin size={15} />
-                  แผนที่ทรัพย์ <b>{pins.length} หมุด</b>
+                  <span>
+                    <b>{pins.length} หมุด</b> · ยืนยัน {confirmedPins.length} ·
+                    ประมาณ {approximateCount}
+                    <small>ทรัพย์ที่มีหลายแปลงอาจแสดงหลายหมุด</small>
+                  </span>
                 </div>
                 <button
                   className="expand-map"
@@ -798,11 +817,7 @@ function App() {
                         </small>
                       )}
                       <div className="card-status">
-                        <span>
-                          {p.parcels.some((v) => v.latitude !== null)
-                            ? "พบพิกัด"
-                            : "รอพิกัด / ตรวจสอบ"}
-                        </span>
+                        <span>{mapLocationLabel(p)}</span>
                         <span>
                           {p.user.auctionStatus === "ended"
                             ? "จบประมูลแล้ว"

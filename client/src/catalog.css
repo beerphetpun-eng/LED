@@ -415,6 +415,16 @@ a {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.location-stats {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid #d4decd;
+}
+.location-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: #52604f;
+  font-size: 11px;
+}
 .map-shell {
   height: 100%;
   position: relative;
@@ -442,8 +452,11 @@ a {
   align-items: center;
 }
 .map-label b {
-  color: #8b957b;
-  font-weight: 400;
+  color: #285b42;
+}
+.map-label small {
+  display: block;
+  color: #52604f;
 }
 .expand-map {
   position: absolute;

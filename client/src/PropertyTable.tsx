@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Star } from "lucide-react";
 import { auctionDay, money } from "./catalog-api";
+import { mapLocationLabel } from "./approximate-location";
 import type { Property } from "./catalog-types";
 
 type Value = string | number | null;
@@ -64,10 +65,7 @@ const columns: Column[] = [
   },
   {
     label: "พิกัด",
-    value: (p) =>
-      p.parcels.some((v) => v.latitude !== null && v.longitude !== null)
-        ? "พบพิกัด"
-        : "รอพิกัด",
+    value: mapLocationLabel,
   },
   {
     label: "สถานะประมูล",
