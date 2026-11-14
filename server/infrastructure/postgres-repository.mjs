@@ -1,6 +1,9 @@
 import pg from "pg";
 import { readFile } from "node:fs/promises";
-import { mergeComponents } from "../domain/asset-components.mjs";
+import {
+  combinedAuctionDates,
+  mergeComponents,
+} from "../domain/asset-components.mjs";
 import { pricingVersion, withPricing } from "../domain/pricing.mjs";
 import {
   defaultSettings,
@@ -188,7 +191,7 @@ async function queueFiles(client, urls) {
       [url],
     );
 }
-export async function upsertProperty(source, runId, retention) {
+export async function upsertProperty(source, runId) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -203,19 +206,6 @@ export async function upsertProperty(source, runId, retention) {
         [source.id],
       )
     ).rows[0];
-    if (
-      shouldExpire(
-        { ...source, user: old?.user_data || emptyUser() },
-        retention,
-      )
-    ) {
-      await queueFiles(client, [...files(source), ...files(old?.source)]);
-      await client.query("DELETE FROM land_radar.properties WHERE id=$1", [
-        source.id,
-      ]);
-      await client.query("COMMIT");
-      return null;
-    }
     const sameParcel =
       old &&
       ["deed", "province", "district", "subdistrict"].every(
@@ -231,6 +221,7 @@ export async function upsertProperty(source, runId, retention) {
           };
     if (source.status !== "failed")
       merged = mergeComponents(old?.source, merged);
+    // Expiration runs after the full extraction, when all bundled rows are known.
     merged = withPricing(merged);
     if (merged.deed && !missingParcelDeeds(merged).length)
       merged.status = "located";
@@ -256,6 +247,7 @@ export async function upsertProperty(source, runId, retention) {
 function hydrate(row) {
   return {
     ...withPricing(row.source),
+    auctionDates: combinedAuctionDates(row.source),
     user: { ...emptyUser(), ...row.user_data },
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
@@ -299,8 +291,8 @@ export async function queryProperties(filters) {
         ),
       ].sort(),
       types: [...new Set(all.map((p) => p.propertyType))].sort(),
-      maxPrice: Math.max(0, ...all.map((p) => p.pricing.total || 0)),
-      maxRai: Math.max(0, ...all.map((p) => (p.areaSqWa || 0) / 400)),
+      maxPrice: all.reduce((max, p) => Math.max(max, p.pricing.total || 0), 0),
+      maxRai: all.reduce((max, p) => Math.max(max, (p.areaSqWa || 0) / 400), 0),
     },
   };
 }

@@ -49,10 +49,8 @@ let stopping = false;
 async function stop() {
   if (stopping) return;
   stopping = true;
-  sync.cancel();
   server.close();
-  await browser.close();
-  await sync.stop();
+  await Promise.all([sync.stop(), browser.close()]);
   await db.close();
   process.exit();
 }

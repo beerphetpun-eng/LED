@@ -2,7 +2,22 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
 import { waitForDistrict } from "../server/infrastructure/landsmaps-geocoder.mjs";
-import { registerLandsOverlays } from "../server/infrastructure/browser-service.mjs";
+import {
+  BrowserService,
+  registerLandsOverlays,
+} from "../server/infrastructure/browser-service.mjs";
+
+test("browser service recreates its pages after Chromium disconnects", async (t) => {
+  const service = new BrowserService();
+  t.after(() => service.close());
+  const oldPage = await service.landsPage();
+  const oldBrowser = service.browser;
+  await oldBrowser.close();
+  const newPage = await service.landsPage();
+  assert.notEqual(service.browser, oldBrowser);
+  assert.notEqual(newPage, oldPage);
+  assert.equal(newPage.isClosed(), false);
+});
 
 test("LandsMaps overlay handlers tolerate a failed dismiss without rejecting", async () => {
   const handlers = [];

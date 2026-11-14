@@ -52,7 +52,11 @@ export class BrowserService {
   }
   async init() {
     await mkdir(evidencePath, { recursive: true });
-    this.browser ??= await chromium.launch({ headless: true });
+    if (!this.browser?.isConnected()) {
+      this.browser = await chromium.launch({ headless: true });
+      this.led = null;
+      this.lands = null;
+    }
     if (!this.led || this.led.isClosed()) {
       const context = await this.browser.newContext({
         viewport: { width: 1440, height: 1100 },

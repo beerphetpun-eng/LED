@@ -72,14 +72,14 @@ function ViewMap({
     if (!visible) return;
     map.invalidateSize();
     const view = `${full}:${key}`;
-    if (fittedView.current === view) return;
+    if (fittedView.current === view || selected) return;
     fittedView.current = view;
-    if (coordinates.length && !selected)
+    if (coordinates.length)
       map.fitBounds(L.latLngBounds(coordinates), {
         padding: [45, 45],
         maxZoom: 14,
       });
-  }, [key, full, visible]);
+  }, [key, full, visible, selected?.id]);
   useEffect(() => {
     if (!focusSelected || !visible) return;
     const p = selected?.parcels.find(
@@ -106,9 +106,16 @@ function App() {
     [highlightedPin, setHighlightedPin] = useState<string | null>(null),
     [filters, setFilters] = useState<Filters>(() => {
       try {
-        return JSON.parse(
+        const saved = JSON.parse(
           localStorage.getItem("land-radar-view-filters") || "{}",
         );
+        if (!saved || typeof saved !== "object" || Array.isArray(saved))
+          return {};
+        return Object.fromEntries(
+          Object.entries(saved).filter(
+            ([, value]) => typeof value === "string",
+          ),
+        ) as Filters;
       } catch {
         return {};
       }
@@ -116,6 +123,7 @@ function App() {
     [loading, setLoading] = useState(true);
   const filtersRef = useRef(filters),
     requestNumber = useRef(0),
+    selectionRequest = useRef(0),
     userWriteVersion = useRef(0),
     selectedId = useRef<string | null>(null);
   filtersRef.current = filters;
@@ -161,7 +169,10 @@ function App() {
       setGeography(g.provinces);
     });
     let n = 0;
+    let polling = false;
     const timer = setInterval(() => {
+      if (polling) return;
+      polling = true;
       void loadSync()
         .then(async (s) => {
           if (++n % 3 === 0 || !s.runtime.running) {
@@ -181,12 +192,19 @@ function App() {
             }
           }
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => setError(e.message))
+        .finally(() => {
+          polling = false;
+        });
     }, 3000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    localStorage.setItem("land-radar-view-filters", JSON.stringify(filters));
+    try {
+      localStorage.setItem("land-radar-view-filters", JSON.stringify(filters));
+    } catch {
+      // Filtering still works when storage is disabled or full.
+    }
     const timer = setTimeout(() => {
       void loadLibrary().catch((e) => {
         setLoading(false);
@@ -199,7 +217,7 @@ function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (image) setImage("");
-        else if (selected) setSelected(null);
+        else if (selected) closeDetails();
         else setFull(false);
       }
     };
@@ -213,11 +231,20 @@ function App() {
       ...(key === "province" ? { district: "" } : {}),
     }));
   }
+  function closeDetails() {
+    selectionRequest.current++;
+    selectedId.current = null;
+    setSelected(null);
+    setHighlightedPin(null);
+  }
   async function select(p: Property, focusMap = true) {
+    const request = ++selectionRequest.current;
     await report("กำลังอ่านรายละเอียด", async () => {
       const d = await api<Property>("/properties/" + p.id);
+      if (request !== selectionRequest.current) return;
       if (focusMap) setHighlightedPin(null);
       setFocusSelected(focusMap);
+      selectedId.current = d.id;
       setSelected(d);
     });
   }
@@ -238,7 +265,9 @@ function App() {
       const p = await api<Property>("/properties/" + id + "/facebook", "POST", {
         nearbyDays: days,
       });
-      if (selectedId.current === id) setSelected(p);
+      setSelected((current) =>
+        current?.id === id ? { ...p, user: current.user } : current,
+      );
       await loadSync();
     });
   }
@@ -249,7 +278,9 @@ function App() {
       requested: number;
       complete: boolean;
     }>(`/properties/${id}/photos/refresh`, "POST");
-    if (selectedId.current === id) setSelected(result.property);
+    setSelected((current) =>
+      current?.id === id ? { ...result.property, user: current.user } : current,
+    );
     return result;
   }
   function exportJSON() {
@@ -828,7 +859,7 @@ function App() {
         <PropertyDetails
           key={selected.id}
           property={selected}
-          onClose={() => setSelected(null)}
+          onClose={closeDetails}
           onSave={(patch) => saveUser(selected.id, patch)}
           onFacebook={(d) => facebook(d)}
           onRefreshPhotos={() => refreshPhotos(selected.id)}

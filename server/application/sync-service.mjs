@@ -28,6 +28,7 @@ export function createSyncService({
     running = false,
     controller,
     timer,
+    stopping = false,
     ticking = false,
     savingSettings = false,
     photoRefresh = null;
@@ -52,9 +53,8 @@ export function createSyncService({
       const fingerprint = JSON.stringify(p);
       const key = p.id + "::" + (p.componentKey || "primary");
       if (job.saved.get(key) === fingerprint) continue;
-      const stored = await db.upsertProperty(p, state.runId, state.retention);
+      await db.upsertProperty(p, state.runId);
       job.saved.set(key, fingerprint);
-      if (stored === null) continue;
       const prefix = `ทรัพย์ ${p.assetSequence} คดี ${p.caseNumber}: `;
       if (p.error || job.detailAttempts.has(key))
         await db.recordCheck({
@@ -88,7 +88,7 @@ export function createSyncService({
     for (const p of all)
       for (const parcel of p.parcels || []) {
         if (
-          parcel.status === "located" &&
+          verified(parcel) &&
           parcel.mapEvidenceUrl &&
           parcel.backgroundReady !== false
         ) {
@@ -138,7 +138,7 @@ export function createSyncService({
             parcel = await geocoder.locate(record, deed, state.runId, signal);
           }
           if (
-            parcel.status === "located" &&
+            verified(parcel) &&
             parcel.mapEvidenceUrl &&
             parcel.backgroundReady !== false
           )
@@ -157,7 +157,7 @@ export function createSyncService({
         signal.throwIfAborted();
         const prefix = `โฉนด ${deed} ${p.district}: `;
         const ready =
-          parcel.status === "located" &&
+          verified(parcel) &&
           parcel.mapEvidenceUrl &&
           parcel.backgroundReady !== false;
         await db.recordCheck({
@@ -194,7 +194,8 @@ export function createSyncService({
     const signal = controller.signal;
     let lookedUp = false;
     try {
-      await cleanup();
+      signal.throwIfAborted();
+      if (geoOnly) await cleanup();
       for (let index = 0; index < scopes.length; index++) {
         signal.throwIfAborted();
         const scope = scopes[index];
@@ -237,6 +238,7 @@ export function createSyncService({
         if (!job.extractionComplete)
           throw Error(job.warnings.join(" · ") || "ต้นทางส่งรายการไม่ครบ");
       }
+      if (!geoOnly) await cleanup();
       if (
         state.geoRetryAt &&
         Date.parse(state.geoRetryAt) > clock().getTime()
@@ -299,9 +301,10 @@ export function createSyncService({
               clock().getTime() + s.intervalHours * 3600000,
             ).toISOString(),
           });
-        await cleanup();
       } catch (e) {
-        await db.alert("เก็บกวาดไฟล์ไม่สำเร็จ: " + e.message).catch(() => {});
+        await db
+          .alert("บันทึกรอบซิงค์ถัดไปไม่สำเร็จ: " + e.message)
+          .catch(() => {});
       } finally {
         running = false;
       }
@@ -314,7 +317,7 @@ export function createSyncService({
     },
     status: () => ({ ...state, running }),
     async refreshPhotos(id) {
-      if (running || savingSettings || photoRefresh)
+      if (stopping || running || savingSettings || photoRefresh)
         throw Error(
           "มีงานซิงค์หรือรีเฟรชรูปอยู่ กรุณาลองอีกครั้งเมื่องานเสร็จ",
         );
@@ -462,7 +465,7 @@ export function createSyncService({
       }
     },
     async settings(value) {
-      if (running || savingSettings || photoRefresh)
+      if (stopping || running || savingSettings || photoRefresh)
         throw Error("รองานซิงค์หรือรีเฟรชรูปก่อนเปลี่ยนขอบเขต");
       const checked = validateSettings(value, geography);
       savingSettings = true;
@@ -478,7 +481,7 @@ export function createSyncService({
       return checked;
     },
     async start(geoOnly = false, automatic = false) {
-      if (running || savingSettings || photoRefresh)
+      if (stopping || running || savingSettings || photoRefresh)
         throw Error("มีงานซิงค์หรือรีเฟรชรูปกำลังทำงานอยู่");
       if (
         geoOnly &&
@@ -524,14 +527,13 @@ export function createSyncService({
           captchaUrl: null,
         });
         service.task = run(scopes, geoOnly, automatic).catch(async (e) => {
-          running = false;
-          await db.alert("ระบบซิงค์ผิดพลาด: " + e.message).catch(() => {});
           state = {
             ...state,
             status: "failed",
             message: e.message,
             captchaUrl: null,
           };
+          await db.alert("ระบบซิงค์ผิดพลาด: " + e.message).catch(() => {});
         });
         return service.status();
       } catch (e) {
@@ -543,17 +545,18 @@ export function createSyncService({
       controller?.abort();
     },
     async tick() {
-      if (ticking || running || savingSettings || photoRefresh) return;
+      if (stopping || ticking || running || savingSettings || photoRefresh)
+        return;
       ticking = true;
       try {
-        await cleanup();
         const s = await db.getSettings();
-        if (running || savingSettings || photoRefresh || !s.enabled) return;
+        if (stopping || running || savingSettings || photoRefresh) return;
         const now = clock().getTime();
         const due = (at) => !at || Date.parse(at) <= now;
-        if (due(state.nextRunAt)) await service.start(false, true);
-        else if (due(state.geoRetryAt || state.nextGeoRunAt))
+        if (s.enabled && due(state.nextRunAt)) await service.start(false, true);
+        else if (s.enabled && due(state.geoRetryAt || state.nextGeoRunAt))
           await service.start(true, true);
+        else await cleanup();
       } catch (e) {
         await db.alert(e.message).catch((alertError) => {
           console.error("Scheduled sync failed:", e);
@@ -564,15 +567,17 @@ export function createSyncService({
       }
     },
     schedule() {
+      if (timer || stopping) return;
       timer = setInterval(() => void service.tick(), 60000);
       timer.unref();
       void service.tick();
     },
     async stop() {
+      stopping = true;
       clearInterval(timer);
       service.cancel();
-      await service.task;
       photoRefresh?.cancel();
+      await service.task;
       await photoRefresh?.task.catch(() => {});
     },
     cleanup,

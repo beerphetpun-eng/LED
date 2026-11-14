@@ -16,7 +16,7 @@ try {
     parcels: [],
     status: "pending",
   };
-  await db.upsertProperty(property, "first", "engaged");
+  await db.upsertProperty(property, "first");
   await db.updateUser(id, {
     bookmarked: true,
     stars: 4,
@@ -37,8 +37,8 @@ try {
   });
   await assert.rejects(db.updateUser(id, { stars: 6 }));
   await db.updateUser(id, { stars: 4, comment: "verification" });
-  await db.upsertProperty({ ...property, price: 200 }, "second", "engaged");
-  await db.upsertProperty({ ...property, price: 300 }, "second", "engaged");
+  await db.upsertProperty({ ...property, price: 200 }, "second");
+  await db.upsertProperty({ ...property, price: 300 }, "second");
   const result = await db.getProperty(id);
   assert.equal(result.price, 300);
   assert.equal(result.syncCount, 2);
@@ -63,21 +63,22 @@ try {
     evidenceReady: true,
     areaSqWa: 10,
   };
-  await db.upsertProperty(component, "second", "engaged");
+  await db.upsertProperty(component, "second");
   await db.upsertProperty(
     {
       ...component,
       componentKey: "room-two",
       screenshotUrl: "/evidence/db-smoke-two.png",
       areaSqWa: 20,
+      auctionDates: ["15/01/2600"],
     },
     "second",
-    "engaged",
   );
-  await db.upsertProperty(component, "second", "engaged");
+  await db.upsertProperty(component, "second");
   const bundle = await db.getProperty(id);
   assert.equal(bundle.assetComponents.length, 2);
   assert.equal(bundle.areaSqWa, 30);
+  assert.deepEqual(bundle.auctionDates, ["01/01/2600", "15/01/2600"]);
   assert.equal(bundle.price, 300);
   assert.equal(bundle.syncCount, 2);
   assert.equal(bundle.user.comment, "verification");
@@ -114,11 +115,7 @@ try {
   assert.deepEqual(unchanged, legacy);
   await db.updateSource(id, { price: 100 });
   assert.equal((await db.getProperty(id)).pricing.total, 640342.67);
-  await db.upsertProperty(
-    { ...component, rawText, price: 200 },
-    "third",
-    "engaged",
-  );
+  await db.upsertProperty({ ...component, rawText, price: 200 }, "third");
   const refreshed = await db.getProperty(id);
   assert.equal(refreshed.pricing.total, 640442.67);
   assert.equal(refreshed.syncCount, 3);

@@ -264,8 +264,11 @@ export function createFacebookSource(
           " — หากเว็บจำกัดการเข้าถึง ให้เปิดหน้าเพจตรวจด้วยตนเอง",
       );
     } finally {
-      await browser?.close();
-      busy = false;
+      try {
+        await browser?.close();
+      } finally {
+        busy = false;
+      }
     }
   }
   return { search };

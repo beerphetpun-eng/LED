@@ -224,6 +224,8 @@ test("daily quota pauses the parcel queue for 302 minutes and resumes after rest
         return {
           deed,
           status: "located",
+          latitude: 18.8,
+          longitude: 98.9,
           mapEvidenceUrl: "/evidence/map.png",
           backgroundReady: true,
         };
@@ -282,6 +284,8 @@ test("verified exact parcels are reused across listings without spending another
       {
         deed: "1",
         status: "located",
+        latitude: 18.8,
+        longitude: 98.9,
         mapEvidenceUrl: "/evidence/map.png",
         backgroundReady: true,
       },
@@ -406,6 +410,8 @@ test("new deeds in an existing bundle are geocoded without repeating complete pa
       return {
         deed,
         status: "located",
+        latitude: 18.8,
+        longitude: 98.9,
         mapEvidenceUrl: "/evidence/new-map.png",
         backgroundReady: true,
       };
@@ -421,6 +427,8 @@ test("new deeds in an existing bundle are geocoded without repeating complete pa
       {
         deed: "1",
         status: "located",
+        latitude: 18.8,
+        longitude: 98.9,
         mapEvidenceUrl: "/evidence/old-map.png",
         backgroundReady: true,
       },
