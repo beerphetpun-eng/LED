@@ -38,7 +38,7 @@ export function mapPinLabel(property: Property) {
   const condo =
     property.areaUnit === "sqm" || /ห้องชุด|คอนโด/.test(property.propertyType);
   const size = condo
-    ? `${areaNumber.format(area * 4)}ตรม`
+    ? `${areaNumber.format(Math.trunc(area * 4))}ตรม`
     : area >= 400
       ? `${areaNumber.format(area / 400)} ไร่`
       : `${areaNumber.format(Math.trunc(area))}ตรว`;
