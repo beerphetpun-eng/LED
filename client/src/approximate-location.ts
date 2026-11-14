@@ -1,4 +1,5 @@
 import type { Property } from "./catalog-types";
+import { mapParcels } from "./catalog-api";
 import areaPoints from "./thailand-area-points.tsv?raw";
 
 type Point = { latitude: number; longitude: number };
@@ -65,4 +66,9 @@ export function approximateLocation(
     longitude: total.longitude / total.count,
     area: `อ.${district} จ.${province}`,
   };
+}
+
+export function mapLocationLabel(property: Property) {
+  if (mapParcels(property).length) return "มีพิกัดยืนยัน";
+  return approximateLocation(property) ? "พิกัดโดยประมาณ" : "ยังไม่มีหมุด";
 }
