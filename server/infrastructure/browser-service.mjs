@@ -7,6 +7,30 @@ export const LED = "https://asset.led.go.th/newbidreg/default.asp",
   LANDS = "https://landsmaps.dol.go.th/";
 export const root = fileURLToPath(new URL("../", import.meta.url)),
   evidencePath = path.join(root, "data", "evidence");
+
+export async function registerLandsOverlays(page) {
+  const controls = [
+    page
+      .locator("#modal_news")
+      .getByRole("button", {
+        name: "ปิดหน้าต่าง",
+        exact: true,
+      })
+      .first(),
+    page.getByRole("button", { name: "ปฏิเสธทั้งหมด", exact: true }).first(),
+  ];
+  for (const control of controls) {
+    await page.addLocatorHandler(control, async (button) => {
+      try {
+        await button.click({ timeout: 3000 });
+      } catch {
+        // An overlay can disappear or change while the handler is running.
+        // Let the awaited search action report a timeout if still blocked.
+      }
+    });
+  }
+}
+
 export class BrowserService {
   busy = false;
   lock = false;
@@ -203,22 +227,7 @@ export class BrowserService {
       });
       this.lands = await c.newPage();
       this.lands.setDefaultTimeout(20000);
-      await this.lands.addLocatorHandler(
-        this.lands.locator("#modal_news"),
-        async (modal) => {
-          await modal
-            .getByRole("button", { name: "ปิดหน้าต่าง", exact: true })
-            .first()
-            .click();
-        },
-      );
-      const cookie = this.lands.getByRole("button", {
-        name: "ปฏิเสธทั้งหมด",
-        exact: true,
-      });
-      await this.lands.addLocatorHandler(cookie, async () => {
-        await cookie.click();
-      });
+      await registerLandsOverlays(this.lands);
     }
     return this.lands;
   }
