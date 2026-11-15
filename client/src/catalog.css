@@ -1194,9 +1194,24 @@ footer {
   padding: 0;
 }
 .facebook-images img {
-  width: 100%;
-  height: 160px;
-  object-fit: contain;
+  max-height: 160px;
+}
+.evidence-image {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.evidence-image > img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.case-box {
+  position: absolute;
+  pointer-events: none;
+  outline: 2px solid #c41c25;
+  box-shadow: 0 0 0 3px #fff8;
 }
 .lightbox {
   position: fixed;
@@ -1219,11 +1234,7 @@ footer {
   color: white;
   font-size: 12px;
 }
-.lightbox > img {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin: auto;
+.lightbox > .evidence-image {
   background: white;
 }
 .leaflet-popup-content {

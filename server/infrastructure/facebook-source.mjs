@@ -1,7 +1,10 @@
 import { chromium } from "playwright";
-import { writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { matchPost } from "../domain/catalog.mjs";
+import { filterFacebookImages } from "./facebook-image-filter.mjs";
 
 const PAGE = "https://web.facebook.com/ledcm2";
 export async function readFacebookPosts(page) {
@@ -58,8 +61,10 @@ export function createFacebookSource(
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
     busy = true;
-    let browser;
+    let browser, staging;
+    const runId = randomUUID();
     try {
+      staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
       browser = await chromium.launch({ headless: true });
       const context = await browser.newContext({
         locale: "en-US",
@@ -147,13 +152,14 @@ export function createFacebookSource(
             const src = await page
               .locator("img")
               .evaluateAll(
-                (imgs) =>
+                (imgs, previous) =>
                   imgs
                     .filter(
                       (i) =>
                         i.getBoundingClientRect().width > 350 &&
                         i.naturalWidth > 500 &&
-                        i.complete,
+                        i.complete &&
+                        i.currentSrc !== previous,
                     )
                     .sort(
                       (a, b) =>
@@ -162,6 +168,7 @@ export function createFacebookSource(
                         a.getBoundingClientRect().width *
                           a.getBoundingClientRect().height,
                     )[0]?.currentSrc,
+                previousSrc,
               );
             if (!src) throw Error("ไม่พบภาพต้นฉบับ");
             previousSrc = src;
@@ -189,9 +196,9 @@ export function createFacebookSource(
                 "image/webp": "webp",
               }[type];
             if (!extension) throw Error("รูปแบบรูปภาพไม่รองรับ");
-            const filename = `fb-${photoId}.${extension}`;
+            const filename = `fb-${photoId}-${runId}.${extension}`;
             await writeFile(
-              path.join(evidencePath, filename),
+              path.join(staging, filename),
               await response.body(),
             );
             images.push({
@@ -244,9 +251,24 @@ export function createFacebookSource(
           rowMatched: false,
         });
       }
+      const filtered = await filterFacebookImages(
+        posts,
+        property.caseNumber,
+        staging,
+      );
+      const retained = new Set(
+        filtered.posts.flatMap((post) => post.images.map((image) => image.url)),
+      );
+      for (const url of retained) {
+        const filename = path.basename(url);
+        await copyFile(
+          path.join(staging, filename),
+          path.join(evidencePath, filename),
+        );
+      }
       return {
         checkedAt: new Date().toISOString(),
-        posts,
+        ...filtered,
         warnings,
         scannedPosts: found.size,
         nearbyDays,
@@ -255,7 +277,7 @@ export function createFacebookSource(
           nearbyDays +
           " วัน จากโพสต์ที่หน้าเว็บเปิดให้เห็น (เลื่อนได้สูงสุด " +
           maxScrolls +
-          " รอบ) เก็บภาพเต็ม ยังไม่ได้ยืนยันแถวหรือเลขคดี ไม่แก้สถานะที่ผู้ใช้กรอก",
+          " รอบ)",
       };
     } catch (e) {
       throw Error(
@@ -268,6 +290,7 @@ export function createFacebookSource(
         await browser?.close();
       } finally {
         busy = false;
+        if (staging) await rm(staging, { recursive: true, force: true });
       }
     }
   }
