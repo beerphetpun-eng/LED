@@ -28,7 +28,13 @@ export async function readFacebookPosts(page) {
             ),
           );
           if (postLinks.size > 1) break;
-          if (photos.length && parent.innerText.includes("ขายทอดตลาด")) {
+          const caption = parent
+            .querySelector(
+              '[data-ad-preview="message"], [data-ad-comet-preview="message"]',
+            )
+            ?.innerText.trim();
+          const text = caption || parent.innerText;
+          if (photos.length && /ขาย\s*ทอดตลาด/.test(text)) {
             const extraPhotos = (anchor) =>
               Number(
                 /^\+\s*(\d+)$/.exec(anchor.innerText.trim())?.[1] ||
@@ -58,7 +64,7 @@ export async function readFacebookPosts(page) {
             if (!photoUrls.length) break;
             result.push({
               url: link.href.split("?")[0],
-              text: parent.innerText,
+              text,
               photoUrls,
               albumStart: more?.href,
               expectedPhotos: photoUrls.length + (more ? extraPhotos(more) : 0),
@@ -196,7 +202,14 @@ export function createFacebookSource(
       );
       const knownUrls = new Set([...previousPosts.keys(), ...additionalPosts]);
       for (const url of knownUrls) {
-        if (!postUrl.test(url) || found.has(url)) continue;
+        if (!postUrl.test(url)) continue;
+        const fromFeed = found.get(url);
+        if (
+          fromFeed &&
+          !additionalPosts.includes(url) &&
+          matchPost(fromFeed.text, property.auctionDates, nearbyDays)
+        )
+          continue;
         try {
           await page.goto(url, {
             waitUntil: "domcontentloaded",
@@ -209,7 +222,7 @@ export function createFacebookSource(
           const post = (await readFacebookPosts(page)).find(
             (entry) => entry.url.replace(/\/$/, "") === url.replace(/\/$/, ""),
           );
-          if (post) found.set(post.url, post);
+          if (post) found.set(url, { ...post, url });
         } catch {
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
