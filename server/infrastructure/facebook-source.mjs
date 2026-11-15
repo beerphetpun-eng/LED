@@ -172,12 +172,9 @@ export function createFacebookSource(
       busy = false;
     }
   }
-  async function search(
-    property,
-    nearbyDays = 0,
-    { additionalPosts = [] } = {},
-  ) {
-    if (additionalPosts.some((url) => !postUrl.test(url)))
+  async function search(property, nearbyDays = 0, { postUrls = [] } = {}) {
+    const requestedPosts = new Set(postUrls);
+    if (postUrls.some((url) => !postUrl.test(url)))
       throw Error("ใช้ลิงก์โพสต์จากเพจสำนักงานบังคับคดีเชียงใหม่ (ledcm2)");
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
     if (!property.auctionDates?.length)
@@ -205,17 +202,19 @@ export function createFacebookSource(
       const found = new Map();
       const warnings = [];
       let loginRequired = false;
-      let unchanged = 0;
+      let unchanged = requestedPosts.size ? 5 : 0;
       try {
-        await page.goto(PAGE, {
-          waitUntil: "domcontentloaded",
-          timeout: 60000,
-        });
-        await dismiss(page);
-        await page
-          .locator('a[href*="/ledcm2/posts/"]')
-          .first()
-          .waitFor({ timeout: 25000 });
+        if (!requestedPosts.size) {
+          await page.goto(PAGE, {
+            waitUntil: "domcontentloaded",
+            timeout: 60000,
+          });
+          await dismiss(page);
+          await page
+            .locator('a[href*="/ledcm2/posts/"]')
+            .first()
+            .waitFor({ timeout: 25000 });
+        }
       } catch {
         unchanged = 5;
         warnings.push(
@@ -245,13 +244,14 @@ export function createFacebookSource(
           ...(property.facebook?.posts || []),
         ].map((post) => [post.url, post]),
       );
-      const knownUrls = new Set([...previousPosts.keys(), ...additionalPosts]);
+      const knownUrls = requestedPosts.size
+        ? requestedPosts
+        : previousPosts.keys();
       for (const url of knownUrls) {
         if (!postUrl.test(url)) continue;
         const fromFeed = found.get(url);
         if (
           fromFeed &&
-          !additionalPosts.includes(url) &&
           matchPost(fromFeed.text, property.auctionDates, nearbyDays)
         )
           continue;
@@ -272,7 +272,7 @@ export function createFacebookSource(
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
       }
-      for (const url of additionalPosts) {
+      for (const url of requestedPosts) {
         const post = found.get(url);
         if (post && !matchPost(post.text, property.auctionDates, nearbyDays))
           warnings.push(
@@ -280,7 +280,11 @@ export function createFacebookSource(
           );
       }
       for (const [url, prior] of previousPosts) {
-        if (postUrl.test(url) && !found.has(url))
+        if (
+          postUrl.test(url) &&
+          !found.has(url) &&
+          (!requestedPosts.size || requestedPosts.has(url))
+        )
           found.set(url, {
             url,
             text: prior.text,
@@ -506,11 +510,16 @@ export function createFacebookSource(
         scannedPosts: found.size,
         nearbyDays,
         note:
-          "จับคู่คำว่า ขายทอดตลาดทรัพย์ และวันประมูล ±" +
+          (requestedPosts.size
+            ? "ตรวจโพสต์ตามลิงก์ที่ระบุ และวันประมูล ±"
+            : "จับคู่คำว่า ขายทอดตลาดทรัพย์ และวันประมูล ±") +
           nearbyDays +
-          " วัน จากโพสต์ที่หน้าเว็บเปิดให้เห็น (เลื่อนได้สูงสุด " +
-          maxScrolls +
-          " รอบ)",
+          " วัน" +
+          (requestedPosts.size
+            ? ""
+            : " จากโพสต์ที่หน้าเว็บเปิดให้เห็น (เลื่อนได้สูงสุด " +
+              maxScrolls +
+              " รอบ)"),
       };
     } catch (e) {
       throw Error(

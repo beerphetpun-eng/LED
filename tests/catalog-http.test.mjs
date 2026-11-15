@@ -41,3 +41,36 @@ test("database outages preserve server identity and malformed JSON stays out of 
   assert.equal((await malformed.json()).error, "ข้อมูล JSON ไม่ถูกต้อง");
   assert.deepEqual(messages, []);
 });
+
+test("passes an explicitly selected Facebook post for a targeted exact-date search", async (t) => {
+  const property = { id: "a".repeat(32) };
+  const post = "https://web.facebook.com/ledcm2/posts/example";
+  let search;
+  const app = createCatalogHttp({
+    repository: {
+      getProperty: async () => property,
+      updateSource: async () => {},
+    },
+    facebook: {
+      search: async (...args) => {
+        search = args;
+        return { posts: [post], warnings: [] };
+      },
+    },
+    root: process.cwd(),
+    evidencePath: process.cwd(),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/properties/${property.id}/facebook`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
+      body: JSON.stringify({ postUrl: post + "?ref=feed" }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(search, [property, 0, { postUrls: [post] }]);
+});
