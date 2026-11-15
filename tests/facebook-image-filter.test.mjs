@@ -70,3 +70,23 @@ test("filters across posts when there is a match and keeps every image otherwise
     assert.deepEqual(filtered.posts, posts);
   }
 });
+
+test("an incomplete album cannot produce a definitive negative result", async () => {
+  const url = "/evidence/fb-123.jpg";
+  const partialPost = {
+    expectedPhotos: 20,
+    downloadedPhotos: 1,
+    images: [{ url }],
+  };
+  const posts = [partialPost, { expectedPhotos: 9, images: [] }];
+  const missing = await filterFacebookImages(posts, "พ.1854/2563", ".", async () => [[]]);
+  assert.equal(missing.caseFilter.status, "incomplete");
+  assert.equal(missing.caseFilter.incompletePosts, 2);
+  assert.deepEqual(missing.posts, posts);
+
+  const box = { x: 0.1, y: 0.85, width: 0.04, height: 0.02 };
+  const found = await filterFacebookImages(posts, "พ.1854/2563", ".", async () => [[box]]);
+  assert.equal(found.caseFilter.status, "matched");
+  assert.equal(found.caseFilter.incompletePosts, 2);
+  assert.deepEqual(found.posts[0].images[0].caseBoxes, [box]);
+});

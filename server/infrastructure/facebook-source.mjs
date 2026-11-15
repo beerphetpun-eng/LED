@@ -132,10 +132,10 @@ export function createFacebookSource(
         await page.waitForTimeout(1200);
         await dismiss(page);
       }
-      const knownUrls = new Set([
-        ...(property.facebook?.posts || []).map(({ url }) => url),
-        ...additionalPosts,
-      ]);
+      const previousPosts = new Map(
+        (property.facebook?.posts || []).map((post) => [post.url, post]),
+      );
+      const knownUrls = new Set([...previousPosts.keys(), ...additionalPosts]);
       for (const url of knownUrls) {
         if (!postUrl.test(url) || found.has(url)) continue;
         try {
@@ -155,6 +155,10 @@ export function createFacebookSource(
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
       }
+      for (const [url, prior] of previousPosts) {
+        if (postUrl.test(url) && !found.has(url))
+          found.set(url, { url, text: prior.text, photoUrls: [], expectedPhotos: 0 });
+      }
       const candidates = [...found.values()]
         .map((p) => ({
           ...p,
@@ -165,12 +169,17 @@ export function createFacebookSource(
         .slice(0, maxPosts);
       const posts = [];
       for (const candidate of candidates) {
+        const previousPost = previousPosts.get(candidate.url);
+        const expectedPhotos = Math.max(
+          candidate.expectedPhotos,
+          previousPost?.expectedPhotos || 0,
+        );
         const images = [];
         const seen = new Set();
         const downloadedSources = new Set();
         let previousSrc = "";
-        const start = new URL(candidate.albumStart || candidate.photoUrls[0]);
-        const album = start.searchParams.get("set");
+        const startLink = candidate.albumStart || candidate.photoUrls[0];
+        const album = startLink && new URL(startLink).searchParams.get("set");
         const capture = async (photoId) => {
           await page.waitForFunction(
             (previous) =>
@@ -240,7 +249,7 @@ export function createFacebookSource(
           });
           downloadedSources.add(src);
         };
-        for (const link of [start.href, ...candidate.photoUrls]) {
+        for (const link of new Set([startLink, ...candidate.photoUrls].filter(Boolean))) {
           if (seen.size >= maxPhotos) break;
           const seed = new URL(link);
           if (
@@ -265,8 +274,8 @@ export function createFacebookSource(
               await capture(photoId);
               seen.add(photoId);
               if (
-                link !== start.href ||
-                images.length >= candidate.expectedPhotos
+                link !== startLink ||
+                images.length >= expectedPhotos
               )
                 break;
               await dismiss(page);
@@ -279,7 +288,12 @@ export function createFacebookSource(
                   { timeout: 5500 },
                 );
               } catch {
-                // The remaining public links can still be opened individually.
+                const login = page.getByRole("dialog").filter({
+                  hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
+                });
+                if (await login.first().isVisible())
+                  warnings.push("Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปถัดไป");
+                // Other links visible on the post can still be read directly.
                 break;
               }
             }
@@ -289,9 +303,24 @@ export function createFacebookSource(
             );
           }
         }
-        if (images.length < candidate.expectedPhotos)
+        for (const prior of previousPost?.images || []) {
+          if (
+            seen.has(prior.photoId) ||
+            !/^\/evidence\/fb-[a-z0-9-]+\.(jpg|png|webp)$/.test(prior.url)
+          )
+            continue;
+          const filename = path.basename(prior.url);
+          try {
+            await copyFile(path.join(evidencePath, filename), path.join(staging, filename));
+            images.push(prior);
+            seen.add(prior.photoId);
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+        }
+        if (images.length < expectedPhotos)
           warnings.push(
-            `เก็บได้ ${images.length} จากอย่างน้อย ${candidate.expectedPhotos} รูปที่ Facebook ระบุ กรุณาดูโพสต์ต้นฉบับเพิ่มเติม`,
+            `เก็บได้ ${images.length} จากอย่างน้อย ${expectedPhotos} รูปที่ Facebook ระบุ กรุณาดูโพสต์ต้นฉบับเพิ่มเติม`,
           );
         posts.push({
           url: candidate.url,
@@ -299,7 +328,7 @@ export function createFacebookSource(
           match: candidate.match,
           images,
           rowMatched: false,
-          expectedPhotos: candidate.expectedPhotos,
+          expectedPhotos,
           downloadedPhotos: images.length,
         });
       }

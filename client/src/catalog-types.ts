@@ -28,10 +28,11 @@ export type FacebookResult = {
   scannedPosts: number;
   warnings: string[];
   caseFilter?: {
-    status: "matched" | "no_match" | "unreadable";
+    status: "matched" | "no_match" | "unreadable" | "incomplete";
     checked: number;
     kept: number;
     total: number;
+    incompletePosts?: number;
   };
   posts: {
     url: string;

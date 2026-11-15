@@ -53,7 +53,13 @@ try {
           line.text.replace(/\s/g, "").includes("เลขคดี"),
         )
       ) {
-        results.push(caseBoxes(standardColumn, caseNumber, width, height));
+        let boxes = caseBoxes(standardColumn, caseNumber, width, height);
+        if (!boxes.length) {
+          // Text in surrounding cells can help OCR distinguish Thai case prefixes.
+          const fullPage = await recognize(bytes, null, PSM.AUTO);
+          boxes = caseBoxes(fullPage, caseNumber, width, height);
+        }
+        results.push(boxes);
         continue;
       }
       const header = await recognize(
@@ -87,8 +93,13 @@ try {
       } else {
         lines = await recognize(bytes, null, PSM.AUTO);
       }
+      let boxes = caseBoxes(lines, caseNumber, width, height);
+      if (!boxes.length && cell) {
+        const fullPage = await recognize(bytes, null, PSM.AUTO);
+        boxes = caseBoxes(fullPage, caseNumber, width, height);
+      }
       results.push(
-        lines.length ? caseBoxes(lines, caseNumber, width, height) : null,
+        lines.length || boxes.length ? boxes : null,
       );
     } catch {
       results.push(null);
