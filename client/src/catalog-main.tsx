@@ -26,12 +26,14 @@ import type {
   SyncResponse,
   Province,
   UserNotes,
+  CaseBox,
 } from "./catalog-types";
 import { api, mapParcels, money, time } from "./catalog-api";
 import { approximateLocation, mapLocationLabel } from "./approximate-location";
 import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
 import { PropertyDetails } from "./PropertyDetails";
+import { EvidenceImage } from "./EvidenceImage";
 import { AlertMenu } from "./AlertMenu";
 import { PropertyTable } from "./PropertyTable";
 import "leaflet/dist/leaflet.css";
@@ -99,7 +101,9 @@ function App() {
     [filtersCollapsed, setFiltersCollapsed] = useState(true),
     [view, setView] = useState<"map" | "list">("map"),
     [listMode, setListMode] = useState<"cards" | "table">("table"),
-    [image, setImage] = useState(""),
+    [image, setImage] = useState<{ url: string; caseBoxes?: CaseBox[] } | null>(
+      null,
+    ),
     [selected, setSelected] = useState<Property | null>(null),
     [focusSelected, setFocusSelected] = useState(false),
     [highlightedPin, setHighlightedPin] = useState<string | null>(null),
@@ -215,7 +219,7 @@ function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (image) setImage("");
+        if (image) setImage(null);
         else if (selected) closeDetails();
         else setFull(false);
       }
@@ -863,18 +867,22 @@ function App() {
           onSave={(patch) => saveUser(selected.id, patch)}
           onFacebook={(d) => facebook(d)}
           onRefreshPhotos={() => refreshPhotos(selected.id)}
-          onImage={setImage}
+          onImage={(url, caseBoxes) => setImage({ url, caseBoxes })}
         />
       )}
       {image && (
         <div className="lightbox" role="dialog" aria-label="ภาพหลักฐาน">
-          <button aria-label="ปิดภาพ" onClick={() => setImage("")}>
+          <button aria-label="ปิดภาพ" onClick={() => setImage(null)}>
             <X />
           </button>
-          <a href={image} target="_blank" rel="noreferrer">
-            เปิดภาพขนาดเต็ม
+          <a href={image.url} target="_blank" rel="noreferrer">
+            เปิดไฟล์ภาพต้นฉบับ
           </a>
-          <img src={image} alt="ภาพหลักฐานต้นฉบับ" />
+          <EvidenceImage
+            url={image.url}
+            boxes={image.caseBoxes}
+            alt="ภาพหลักฐาน"
+          />
         </div>
       )}
     </div>

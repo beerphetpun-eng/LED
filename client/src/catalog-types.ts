@@ -16,16 +16,33 @@ export type Parcel = {
   note?: string;
   lookupWarning?: string;
 };
+export type CaseBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type FacebookResult = {
   checkedAt: string;
   note: string;
   scannedPosts: number;
   warnings: string[];
+  caseFilter?: {
+    status: "matched" | "no_match" | "unreadable";
+    checked: number;
+    kept: number;
+    total: number;
+  };
   posts: {
     url: string;
     text: string;
     match: { date: string; auction: string; days: number; kind: string };
-    images: { url: string; sourceUrl: string; photoId: string }[];
+    images: {
+      url: string;
+      sourceUrl: string;
+      photoId: string;
+      caseBoxes?: CaseBox[];
+    }[];
     rowMatched: boolean;
   }[];
 };

@@ -50,7 +50,17 @@ if (build || !existsSync(path.join(server, "wwwroot", "index.html"))) {
   run("npm.cmd", ["ci", "--no-audit", "--no-fund"], client);
   run("npm.cmd", ["run", "build"], client);
 }
-if (!existsSync(path.join(server, "node_modules", "playwright")))
+if (
+  ![
+    "playwright",
+    "tesseract.js",
+    "image-size",
+    "@tesseract.js-data/tha",
+    "@tesseract.js-data/eng",
+  ].every((dependency) =>
+    existsSync(path.join(server, "node_modules", dependency)),
+  )
+)
   run("npm.cmd", ["ci", "--no-audit", "--no-fund"], server);
 run(
   process.execPath,

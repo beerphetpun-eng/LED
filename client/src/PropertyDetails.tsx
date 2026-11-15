@@ -8,7 +8,8 @@ import {
   RefreshCw,
   Image as ImageIcon,
 } from "lucide-react";
-import type { Property, UserNotes } from "./catalog-types";
+import type { CaseBox, Property, UserNotes } from "./catalog-types";
+import { EvidenceImage } from "./EvidenceImage";
 import { mapParcels, money, time, today, auctionDay } from "./catalog-api";
 import { approximateLocation } from "./approximate-location";
 
@@ -52,7 +53,7 @@ export function PropertyDetails({
     requested: number;
     complete: boolean;
   }>;
-  onImage: (url: string) => void;
+  onImage: (url: string, caseBoxes?: CaseBox[]) => void;
 }) {
   const [pendingPreferences, setPendingPreferences] = useState<Partial<
       Omit<UserNotes, "comment">
@@ -99,6 +100,7 @@ export function PropertyDetails({
     }
   }
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
+  const caseFilter = p.facebook?.caseFilter;
   const next = p.auctionDates
     .map(auctionDay)
     .filter((d) => d >= today())
@@ -492,7 +494,9 @@ export function PropertyDetails({
                   }
                 }}
               >
-                {fbBusy ? "กำลังค้นโพสต์และรูป…" : "ดึงข้อมูลจาก Facebook"}
+                {fbBusy
+                  ? "กำลังค้นโพสต์และอ่านเลขคดีในรูป…"
+                  : "ดึงข้อมูลจาก Facebook"}
               </button>
               <a
                 className="text-link"
@@ -507,6 +511,17 @@ export function PropertyDetails({
                   <p className="small muted">
                     ตรวจเมื่อ {time(p.facebook.checkedAt)} · {p.facebook.note}
                   </p>
+                  {caseFilter && (
+                    <p className="small">
+                      {caseFilter.status === "matched"
+                        ? `OCR พบเลขคดี ${p.caseNumber} ใน ${caseFilter.kept} จาก ${caseFilter.total} รูป`
+                        : caseFilter.status === "no_match"
+                          ? `OCR ไม่พบเลขคดี ${p.caseNumber} จึงเก็บทั้ง ${caseFilter.total} รูป`
+                          : `OCR อ่านเลขคดีได้ไม่ครบ จึงเก็บทั้ง ${caseFilter.total} รูป`}
+                      {caseFilter.checked < caseFilter.total &&
+                        ` · อ่านได้ ${caseFilter.checked} รูป`}
+                    </p>
+                  )}
                   {!p.facebook.posts.length && (
                     <p>ไม่พบโพสต์ที่ตรงในช่วงที่ตรวจอ่านได้</p>
                   )}
@@ -518,9 +533,6 @@ export function PropertyDetails({
                           : `วันที่ห่าง ${post.match.days} วัน`}{" "}
                         · {post.match.date} <ExternalLink size={13} />
                       </a>
-                      <p className="small">
-                        ยังไม่ได้ยืนยันแถวที่ตรงกับคดี {p.caseNumber}
-                      </p>
                       <details>
                         <summary>อ่านข้อความโพสต์</summary>
                         <p>{post.text}</p>
@@ -529,12 +541,17 @@ export function PropertyDetails({
                         {post.images.map((im) => (
                           <button
                             key={im.photoId}
-                            onClick={() => onImage(im.url)}
+                            onClick={() => onImage(im.url, im.caseBoxes)}
                           >
-                            <img
-                              loading="lazy"
-                              src={im.url}
-                              alt="ตารางประกาศขายทอดตลาดฉบับเต็ม"
+                            <EvidenceImage
+                              lazy
+                              url={im.url}
+                              boxes={im.caseBoxes}
+                              alt={
+                                im.caseBoxes?.length
+                                  ? `ตารางประกาศพร้อมกรอบเลขคดี ${p.caseNumber}`
+                                  : "ตารางประกาศขายทอดตลาดฉบับเต็ม"
+                              }
                             />
                           </button>
                         ))}
