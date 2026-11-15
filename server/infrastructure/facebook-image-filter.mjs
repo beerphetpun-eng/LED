@@ -39,9 +39,22 @@ export async function filterFacebookImages(
     ...new Set(posts.flatMap((post) => post.images.map((image) => image.url))),
   ];
   const incompletePosts = posts.filter(
-    (post) => (post.downloadedPhotos ?? post.images.length) < post.expectedPhotos,
+    (post) =>
+      !Number.isSafeInteger(post.expectedPhotos) ||
+      post.images.length < post.expectedPhotos,
   ).length;
-  if (!urls.length && !incompletePosts) return { posts };
+  if (incompletePosts)
+    return {
+      caseFilter: {
+        status: "incomplete",
+        checked: 0,
+        kept: urls.length,
+        total: urls.length,
+        incompletePosts,
+      },
+      posts,
+    };
+  if (!urls.length) return { posts };
   let results = [];
   try {
     const files = urls.map((url) => {
@@ -49,7 +62,8 @@ export async function filterFacebookImages(
         throw Error("Invalid Facebook image path");
       return path.join(directory, path.basename(url));
     });
-    if (caseNumber && files.length) results = await recognize(caseNumber, files);
+    if (caseNumber && files.length)
+      results = await recognize(caseNumber, files);
   } catch {
     // Preserve the original selection if OCR cannot run.
   }
@@ -63,11 +77,9 @@ export async function filterFacebookImages(
   ).length;
   const status = matches.size
     ? "matched"
-    : incompletePosts
-      ? "incomplete"
-      : checked === urls.length
-        ? "no_match"
-        : "unreadable";
+    : checked === urls.length
+      ? "no_match"
+      : "unreadable";
   return {
     caseFilter: {
       status,

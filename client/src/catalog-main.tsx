@@ -261,12 +261,13 @@ function App() {
     );
     void loadLibrary().catch((e) => setError(e.message));
   }
-  async function facebook(days: number) {
+  async function facebook(days: number, postUrl: string) {
     if (!selected) return;
     const id = selected.id;
     await report("กำลังอ่าน Facebook", async () => {
       const p = await api<Property>("/properties/" + id + "/facebook", "POST", {
         nearbyDays: days,
+        postUrl,
       });
       setSelected((current) =>
         current?.id === id ? { ...p, user: current.user } : current,
@@ -865,7 +866,7 @@ function App() {
           property={selected}
           onClose={closeDetails}
           onSave={(patch) => saveUser(selected.id, patch)}
-          onFacebook={(d) => facebook(d)}
+          onFacebook={facebook}
           onRefreshPhotos={() => refreshPhotos(selected.id)}
           onImage={(url, caseBoxes) => setImage({ url, caseBoxes })}
         />

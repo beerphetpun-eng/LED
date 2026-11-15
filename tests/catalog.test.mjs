@@ -198,10 +198,22 @@ test("Facebook matching tolerates formatting and Thai digits but never matches u
     0,
   );
   assert.equal(
-    matchPost("ผลการขายทอดตลาดทรัพย์ ประจำวันที่\u200b 5 พฤศจิกายน 2569", dates)
-      .days,
+    matchPost(
+      "ผลการขายทอดตลาดทรัพย์ ประจำวันที่\u200b 5 พฤศจิกายน 2569",
+      dates,
+      7,
+    ).days,
     7,
   );
   assert.equal(matchPost("งานมหกรรม 12 พฤศจิกายน 2569", dates), null);
   assert.equal(matchPost("ขายทอดตลาดทรัพย์ 5 พฤศจิกายน 2569", dates, 3), null);
+});
+
+test("Facebook defaults to the auction date in the caption and does not match dates elsewhere", () => {
+  const posted =
+    "29/10/2569 ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 5 พฤศจิกายน 2569 นัดถัดไป 19/11/2569";
+  const dates = ["29/10/2569", "19/11/2569"];
+  assert.equal(matchPost(posted, dates), null);
+  assert.equal(matchPost(posted, dates, 7)?.date, "2026-11-05");
+  assert.equal(matchPost(posted, ["05/11/2569"])?.days, 0);
 });

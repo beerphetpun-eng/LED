@@ -29,9 +29,15 @@ export async function readFacebookPosts(page) {
           );
           if (postLinks.size > 1) break;
           if (photos.length && parent.innerText.includes("ขายทอดตลาด")) {
-            const more = photos.find((a) =>
-              /^\+\s*\d+$/.test(a.innerText.trim()),
-            );
+            const extraPhotos = (anchor) =>
+              Number(
+                /^\+\s*(\d+)$/.exec(anchor.innerText.trim())?.[1] ||
+                  /\b(\d+) remaining items?\b/i.exec(
+                    anchor.getAttribute("aria-label") || "",
+                  )?.[1] ||
+                  0,
+              );
+            const more = photos.find((anchor) => extraPhotos(anchor) > 0);
             const photoUrls = [
               ...new Map(
                 photos.flatMap((a) => {
@@ -55,9 +61,7 @@ export async function readFacebookPosts(page) {
               text: parent.innerText,
               photoUrls,
               albumStart: more?.href,
-              expectedPhotos:
-                photoUrls.length +
-                Number(more?.innerText.replace(/\D/g, "") || 0),
+              expectedPhotos: photoUrls.length + (more ? extraPhotos(more) : 0),
             });
             break;
           }
@@ -68,9 +72,50 @@ export async function readFacebookPosts(page) {
 }
 export function createFacebookSource(
   evidencePath,
-  { maxScrolls = 20, maxPosts = 6, maxPhotos = 60 } = {},
+  { maxScrolls = 20, profilePath } = {},
 ) {
   let busy = false;
+  let signIn;
+  const browserOptions = {
+    locale: "en-US",
+    viewport: { width: 1440, height: 1100 },
+  };
+  const profileOptions = {
+    ...browserOptions,
+    ...(process.platform === "win32" ? { channel: "msedge" } : {}),
+    acceptDownloads: false,
+  };
+  async function openSignIn() {
+    if (!profilePath) throw Error("ยังไม่ได้ตั้งค่าเบราว์เซอร์ Facebook");
+    if (busy) throw Error("กำลังดึงรูป Facebook กรุณารอให้รอบนี้เสร็จ");
+    busy = true;
+    let context = signIn;
+    const opening = !context;
+    try {
+      if (!context) {
+        context = await chromium.launchPersistentContext(profilePath, {
+          ...profileOptions,
+          headless: false,
+        });
+        signIn = context;
+        context.on("close", () => {
+          if (signIn === context) signIn = undefined;
+        });
+      }
+      const page = context.pages()[0] || (await context.newPage());
+      await page.bringToFront();
+      if (opening)
+        await page.goto("https://www.facebook.com/login/", {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+    } catch (error) {
+      await context?.close().catch(() => {});
+      throw error;
+    } finally {
+      busy = false;
+    }
+  }
   async function dismiss(page) {
     const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).last();
     if (await close.isVisible())
@@ -78,22 +123,30 @@ export function createFacebookSource(
   }
   async function search(
     property,
-    nearbyDays = 7,
+    nearbyDays = 0,
     { additionalPosts = [] } = {},
   ) {
+    if (additionalPosts.some((url) => !postUrl.test(url)))
+      throw Error("ใช้ลิงก์โพสต์จากเพจสำนักงานบังคับคดีเชียงใหม่ (ledcm2)");
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
+    if (signIn)
+      throw Error("ปิดหน้าต่าง Facebook หลังเข้าสู่ระบบ แล้วกดดึงรูปอีกครั้ง");
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
     busy = true;
-    let browser, staging;
+    let browser, context, staging;
     const runId = randomUUID();
     try {
       staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
-      browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext({
-        locale: "en-US",
-        viewport: { width: 1440, height: 1100 },
-      });
+      if (profilePath) {
+        context = await chromium.launchPersistentContext(profilePath, {
+          ...profileOptions,
+          headless: true,
+        });
+      } else {
+        browser = await chromium.launch({ headless: true });
+        context = await browser.newContext(browserOptions);
+      }
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
       const found = new Map();
@@ -133,7 +186,10 @@ export function createFacebookSource(
         await dismiss(page);
       }
       const previousPosts = new Map(
-        (property.facebook?.posts || []).map((post) => [post.url, post]),
+        [
+          ...(property.facebook?.albumCoverage || []),
+          ...(property.facebook?.posts || []),
+        ].map((post) => [post.url, post]),
       );
       const knownUrls = new Set([...previousPosts.keys(), ...additionalPosts]);
       for (const url of knownUrls) {
@@ -155,9 +211,21 @@ export function createFacebookSource(
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
       }
+      for (const url of additionalPosts) {
+        const post = found.get(url);
+        if (post && !matchPost(post.text, property.auctionDates, nearbyDays))
+          warnings.push(
+            "วันที่ในลิงก์โพสต์ที่ระบุอยู่นอกช่วงวันประมูลที่เลือก",
+          );
+      }
       for (const [url, prior] of previousPosts) {
         if (postUrl.test(url) && !found.has(url))
-          found.set(url, { url, text: prior.text, photoUrls: [], expectedPhotos: 0 });
+          found.set(url, {
+            url,
+            text: prior.text,
+            photoUrls: [],
+            expectedPhotos: 0,
+          });
       }
       const candidates = [...found.values()]
         .map((p) => ({
@@ -165,20 +233,21 @@ export function createFacebookSource(
           match: matchPost(p.text, property.auctionDates, nearbyDays),
         }))
         .filter((p) => p.match)
-        .sort((a, b) => a.match.days - b.match.days)
-        .slice(0, maxPosts);
+        .sort((a, b) => a.match.days - b.match.days);
       const posts = [];
       for (const candidate of candidates) {
         const previousPost = previousPosts.get(candidate.url);
-        const expectedPhotos = Math.max(
-          candidate.expectedPhotos,
-          previousPost?.expectedPhotos || 0,
-        );
+        const expectedPhotos =
+          Math.max(
+            candidate.expectedPhotos,
+            previousPost?.expectedPhotos || 0,
+          ) || null;
         const images = [];
         const seen = new Set();
         const downloadedSources = new Set();
+        const photoSources = new Map();
         let previousSrc = "";
-        const startLink = candidate.albumStart || candidate.photoUrls[0];
+        const startLink = candidate.photoUrls[0];
         const album = startLink && new URL(startLink).searchParams.get("set");
         const capture = async (photoId) => {
           await page.waitForFunction(
@@ -248,36 +317,48 @@ export function createFacebookSource(
             photoId,
           });
           downloadedSources.add(src);
+          photoSources.set(photoId, src);
         };
-        for (const link of new Set([startLink, ...candidate.photoUrls].filter(Boolean))) {
-          if (seen.size >= maxPhotos) break;
+        for (const link of new Set(
+          [startLink, candidate.albumStart, ...candidate.photoUrls].filter(
+            Boolean,
+          ),
+        )) {
+          if (seen.size >= expectedPhotos) break;
           const seed = new URL(link);
-          if (
-            !seed.searchParams.get("fbid") ||
-            seen.has(seed.searchParams.get("fbid"))
-          )
-            continue;
+          const traverse = link === startLink || link === candidate.albumStart;
+          if (seen.has(seed.searchParams.get("fbid")) && !traverse) continue;
           try {
             await page.goto(link, {
               waitUntil: "domcontentloaded",
               timeout: 30000,
             });
-            while (seen.size < maxPhotos) {
+            const visited = new Set();
+            previousSrc = "";
+            while (
+              seen.size < expectedPhotos &&
+              visited.size < expectedPhotos
+            ) {
               const current = new URL(page.url());
               const photoId = current.searchParams.get("fbid");
               if (
                 !/^\d+$/.test(photoId || "") ||
-                seen.has(photoId) ||
+                visited.has(photoId) ||
                 current.searchParams.get("set") !== album
               )
                 break;
-              await capture(photoId);
-              seen.add(photoId);
-              if (
-                link !== startLink ||
-                images.length >= expectedPhotos
-              )
-                break;
+              visited.add(photoId);
+              if (!seen.has(photoId)) {
+                try {
+                  await capture(photoId);
+                  seen.add(photoId);
+                } catch {
+                  // An unavailable image must not prevent checking the next one.
+                }
+              } else {
+                previousSrc = photoSources.get(photoId) || "";
+              }
+              if (!traverse || seen.size >= expectedPhotos) break;
               await dismiss(page);
               try {
                 await page
@@ -289,7 +370,8 @@ export function createFacebookSource(
                 );
               } catch {
                 const login = page.getByRole("dialog").filter({
-                  hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
+                  hasText:
+                    /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
                 });
                 if (await login.first().isVisible())
                   warnings.push("Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปถัดไป");
@@ -311,23 +393,28 @@ export function createFacebookSource(
             continue;
           const filename = path.basename(prior.url);
           try {
-            await copyFile(path.join(evidencePath, filename), path.join(staging, filename));
+            await copyFile(
+              path.join(evidencePath, filename),
+              path.join(staging, filename),
+            );
             images.push(prior);
             seen.add(prior.photoId);
           } catch (error) {
             if (error.code !== "ENOENT") throw error;
           }
         }
-        if (images.length < expectedPhotos)
+        if (expectedPhotos == null || images.length < expectedPhotos)
           warnings.push(
-            `เก็บได้ ${images.length} จากอย่างน้อย ${expectedPhotos} รูปที่ Facebook ระบุ กรุณาดูโพสต์ต้นฉบับเพิ่มเติม`,
+            expectedPhotos == null
+              ? "Facebook ไม่แสดงจำนวนรูปในโพสต์ จึงยังยืนยันไม่ได้ว่าดึงครบ"
+              : `เก็บได้ ${images.length} จาก ${expectedPhotos} รูปที่ Facebook ระบุ`,
           );
         posts.push({
           url: candidate.url,
           text: candidate.text,
           match: candidate.match,
           images,
-          rowMatched: false,
+          rowMatched: images.some((image) => image.caseBoxes?.length),
           expectedPhotos,
           downloadedPhotos: images.length,
         });
@@ -350,6 +437,7 @@ export function createFacebookSource(
       return {
         checkedAt: new Date().toISOString(),
         ...filtered,
+        albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
         warnings,
         scannedPosts: found.size,
         nearbyDays,
@@ -368,12 +456,16 @@ export function createFacebookSource(
       );
     } finally {
       try {
-        await browser?.close();
+        try {
+          await context?.close();
+        } finally {
+          await browser?.close();
+        }
       } finally {
         busy = false;
         if (staging) await rm(staging, { recursive: true, force: true });
       }
     }
   }
-  return { search };
+  return { search, openSignIn };
 }
