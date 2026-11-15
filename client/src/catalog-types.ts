@@ -45,7 +45,7 @@ export type FacebookResult = {
       caseBoxes?: CaseBox[];
     }[];
     rowMatched: boolean;
-    expectedPhotos?: number;
+    expectedPhotos?: number | null;
     downloadedPhotos?: number;
   }[];
 };

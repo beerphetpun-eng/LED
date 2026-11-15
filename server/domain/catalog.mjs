@@ -256,9 +256,10 @@ export function postDates(text) {
   const s = clean(text)
     .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50))
     .replace(/[\u200b-\u200f]/g, "");
-  const result = [...s.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g)]
-    .map((m) => auctionISO(m[0]))
-    .filter(Boolean);
+  const dates = [...s.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g)].map((m) => ({
+    date: auctionISO(m[0]),
+    index: m.index,
+  }));
   for (const m of s.matchAll(
     new RegExp(
       `(\\d{1,2})\\s*(${thaiMonths.join("|")})\\s*(?:พ\\.?ศ\\.?\\s*)?(\\d{4})`,
@@ -266,27 +267,40 @@ export function postDates(text) {
     ),
   )) {
     const date = auctionISO(`${m[1]}/${thaiMonths.indexOf(m[2]) + 1}/${m[3]}`);
-    if (date) result.push(date);
+    dates.push({ date, index: m.index });
   }
-  return [...new Set(result)];
+  return [
+    ...new Set(
+      dates
+        .sort((a, b) => a.index - b.index)
+        .map(({ date }) => date)
+        .filter(Boolean),
+    ),
+  ];
 }
-export function matchPost(text, auctionDates, nearbyDays = 7) {
-  if (!clean(text).replace(/\s/g, "").includes("ขายทอดตลาดทรัพย์")) return null;
-  const dates = postDates(text),
-    auctions = auctionDates.map(auctionISO).filter(Boolean);
+export function matchPost(text, auctionDates, nearbyDays = 0) {
+  const content = clean(text).replace(/[\u200b-\u200f]/g, "");
+  const title = /ขาย\s*ทอดตลาด\s*ทรัพย์/.exec(content);
+  if (!title) return null;
+  const caption = content.slice(title.index + title[0].length);
+  const datedCaption = /(?:ประจำ\s*)?วัน\s*ที่\s*(?=[\d๐-๙])/.exec(caption);
+  const date = postDates(
+    datedCaption
+      ? caption.slice(datedCaption.index + datedCaption[0].length)
+      : caption,
+  )[0];
+  if (!date) return null;
+  const auctions = auctionDates.map(auctionISO).filter(Boolean);
   let best = null;
-  for (const date of dates)
-    for (const auction of auctions) {
-      const days = Math.abs(
-        (Date.parse(date) - Date.parse(auction)) / 86400000,
-      );
-      if (days <= nearbyDays && (!best || days < best.days))
-        best = {
-          date,
-          auction,
-          days,
-          kind: days === 0 ? "exact_date" : "nearby_date",
-        };
-    }
+  for (const auction of auctions) {
+    const days = Math.abs((Date.parse(date) - Date.parse(auction)) / 86400000);
+    if (days <= nearbyDays && (!best || days < best.days))
+      best = {
+        date,
+        auction,
+        days,
+        kind: days === 0 ? "exact_date" : "nearby_date",
+      };
+  }
   return best;
 }

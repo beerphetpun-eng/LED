@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { CaseBox, Property, UserNotes } from "./catalog-types";
 import { EvidenceImage } from "./EvidenceImage";
-import { mapParcels, money, time, today, auctionDay } from "./catalog-api";
+import { api, mapParcels, money, time, today, auctionDay } from "./catalog-api";
 import { approximateLocation } from "./approximate-location";
 
 function EvidenceStatus({ property }: { property: Property }) {
@@ -47,7 +47,7 @@ export function PropertyDetails({
   property: Property;
   onClose: () => void;
   onSave: (patch: Partial<UserNotes>) => Promise<void>;
-  onFacebook: (days: number) => Promise<void>;
+  onFacebook: (days: number, postUrl: string) => Promise<void>;
   onRefreshPhotos: () => Promise<{
     checked: number;
     requested: number;
@@ -66,12 +66,15 @@ export function PropertyDetails({
     [savingComment, setSavingComment] = useState(false),
     [commentError, setCommentError] = useState(""),
     [fbBusy, setFbBusy] = useState(false),
+    [fbSignInBusy, setFbSignInBusy] = useState(false),
+    [fbSignInMessage, setFbSignInMessage] = useState(""),
+    [fbPostUrl, setFbPostUrl] = useState(""),
     [photoBusy, setPhotoBusy] = useState(false),
     [photoMessage, setPhotoMessage] = useState<{
       text: string;
       warning: boolean;
     } | null>(null),
-    [days, setDays] = useState(7);
+    [days, setDays] = useState(0);
   const user = { ...p.user, ...pendingPreferences };
   const comment = commentDraft ?? p.user.comment;
   async function savePreferences(patch: Partial<Omit<UserNotes, "comment">>) {
@@ -488,13 +491,22 @@ export function PropertyDetails({
                   ))}
                 </select>
               </label>
+              <details>
+                <summary>ระบุลิงก์โพสต์ Facebook</summary>
+                <input
+                  type="url"
+                  aria-label="ลิงก์โพสต์ Facebook"
+                  value={fbPostUrl}
+                  onChange={(event) => setFbPostUrl(event.target.value)}
+                />
+              </details>
               <button
                 className="primary"
-                disabled={fbBusy}
+                disabled={fbBusy || fbSignInBusy}
                 onClick={async () => {
                   setFbBusy(true);
                   try {
-                    await onFacebook(days);
+                    await onFacebook(days, fbPostUrl);
                   } catch {
                     // The notification menu reports the failure.
                   } finally {
@@ -506,6 +518,31 @@ export function PropertyDetails({
                   ? "กำลังค้นโพสต์และอ่านเลขคดีในรูป…"
                   : "ดึงข้อมูลจาก Facebook"}
               </button>
+              <button
+                type="button"
+                disabled={fbBusy || fbSignInBusy}
+                onClick={async () => {
+                  setFbSignInBusy(true);
+                  setFbSignInMessage("");
+                  try {
+                    await api("/facebook/sign-in", "POST");
+                    setFbSignInMessage(
+                      "เข้าสู่ระบบในหน้าต่าง Facebook แล้วปิดหน้าต่างก่อนกดดึงรูปอีกครั้ง",
+                    );
+                  } catch (error) {
+                    setFbSignInMessage((error as Error).message);
+                  } finally {
+                    setFbSignInBusy(false);
+                  }
+                }}
+              >
+                เปิดหน้าลงชื่อเข้าใช้ Facebook
+              </button>
+              {fbSignInMessage && (
+                <p className="small" role="status">
+                  {fbSignInMessage}
+                </p>
+              )}
               <a
                 className="text-link"
                 href="https://web.facebook.com/ledcm2"
@@ -523,12 +560,14 @@ export function PropertyDetails({
                     <p className="small">
                       {caseFilter.status === "matched"
                         ? `พบเลขคดี ${p.caseNumber} ใน ${caseFilter.kept} จาก ${caseFilter.total} รูปที่ดึงได้`
-                        : incompleteFacebookPosts || caseFilter.status === "incomplete"
-                          ? `ตรวจรูปยังไม่ครบ ตรวจแล้ว ${caseFilter.checked} รูป จึงยังสรุปผลไม่ได้`
+                        : incompleteFacebookPosts ||
+                            caseFilter.status === "incomplete"
+                          ? `ดึงรูปยังไม่ครบ เก็บได้ ${caseFilter.total} รูป จะเริ่มคัดเลขคดีเมื่อได้ครบทุกโพสต์`
                           : caseFilter.status === "no_match"
                             ? `OCR ไม่พบเลขคดี ${p.caseNumber} จึงเก็บทั้ง ${caseFilter.total} รูป`
                             : `OCR อ่านเลขคดีได้ไม่ครบ จึงเก็บทั้ง ${caseFilter.total} รูป`}
-                      {caseFilter.status === "matched" && incompleteFacebookPosts > 0 &&
+                      {caseFilter.status === "matched" &&
+                        incompleteFacebookPosts > 0 &&
                         ` · ยังดึงรูปไม่ครบ ${incompleteFacebookPosts} โพสต์`}
                       {caseFilter.checked < caseFilter.total &&
                         ` · อ่านได้ ${caseFilter.checked} รูป`}
@@ -553,6 +592,11 @@ export function PropertyDetails({
                             {post.expectedPhotos} รูป
                           </p>
                         )}
+                      {post.expectedPhotos === null && (
+                        <p className="small muted">
+                          Facebook ยังไม่แสดงจำนวนรูปทั้งหมดของโพสต์นี้
+                        </p>
+                      )}
                       <details>
                         <summary>อ่านข้อความโพสต์</summary>
                         <p>{post.text}</p>

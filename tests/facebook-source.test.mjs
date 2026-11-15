@@ -9,7 +9,7 @@ test("public feed extraction keeps post text and observed photo links together",
     const page = await browser.newPage();
     await page.setContent(`<main>
    <article><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">today</a><p>ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
-   <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a><a href="https://web.facebook.com/photo/?fbid=457&set=pcb.2">+15</a><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2&ref=extra">duplicate</a></article>
+   <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a><a href="https://web.facebook.com/photo/?fbid=457&set=pcb.2" aria-label="15 remaining items">more</a><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2&ref=extra">duplicate</a></article>
    <article><a href="https://web.facebook.com/ledcm2/posts/other">other</a><p>กิจกรรมสำนักงาน</p><a href="https://web.facebook.com/photo?fbid=789">photo</a></article>
   </main>`);
     const posts = await readFacebookPosts(page);

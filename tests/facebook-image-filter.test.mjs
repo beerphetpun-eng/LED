@@ -43,7 +43,7 @@ test("matches the same case with or without a trailing E in the prefix", () => {
 
 test("filters across posts when there is a match and keeps every image otherwise", async () => {
   const photos = ["/evidence/fb-123.jpg", "/evidence/fb-456.jpg"];
-  const posts = photos.map((url) => ({ images: [{ url }] }));
+  const posts = photos.map((url) => ({ expectedPhotos: 1, images: [{ url }] }));
   const box = { x: 0.1, y: 0.2, width: 0.3, height: 0.1 };
   const found = await filterFacebookImages(
     posts,
@@ -71,22 +71,28 @@ test("filters across posts when there is a match and keeps every image otherwise
   }
 });
 
-test("an incomplete album cannot produce a definitive negative result", async () => {
+test("OCR waits while any album has missing images or an unknown size", async () => {
   const url = "/evidence/fb-123.jpg";
   const partialPost = {
     expectedPhotos: 20,
     downloadedPhotos: 1,
     images: [{ url }],
   };
-  const posts = [partialPost, { expectedPhotos: 9, images: [] }];
-  const missing = await filterFacebookImages(posts, "พ.1854/2563", ".", async () => [[]]);
+  const posts = [partialPost, { expectedPhotos: null, images: [] }];
+  let calls = 0;
+  const recognize = async () => {
+    calls++;
+    return [[]];
+  };
+  const missing = await filterFacebookImages(
+    posts,
+    "พ.1854/2563",
+    ".",
+    recognize,
+  );
+  assert.equal(calls, 0);
   assert.equal(missing.caseFilter.status, "incomplete");
   assert.equal(missing.caseFilter.incompletePosts, 2);
+  assert.equal(missing.caseFilter.checked, 0);
   assert.deepEqual(missing.posts, posts);
-
-  const box = { x: 0.1, y: 0.85, width: 0.04, height: 0.02 };
-  const found = await filterFacebookImages(posts, "พ.1854/2563", ".", async () => [[box]]);
-  assert.equal(found.caseFilter.status, "matched");
-  assert.equal(found.caseFilter.incompletePosts, 2);
-  assert.deepEqual(found.posts[0].images[0].caseBoxes, [box]);
 });
