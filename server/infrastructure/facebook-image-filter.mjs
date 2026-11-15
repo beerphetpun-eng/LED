@@ -11,7 +11,7 @@ async function recognizeCases(caseNumber, files) {
       const child = execFile(
         process.execPath,
         [fileURLToPath(new URL("./facebook-ocr-worker.mjs", import.meta.url))],
-        { timeout: 240_000, windowsHide: true },
+        { timeout: 600_000, windowsHide: true },
         (error, stdout) => {
           if (error) return reject(error);
           try {
@@ -38,7 +38,10 @@ export async function filterFacebookImages(
   const urls = [
     ...new Set(posts.flatMap((post) => post.images.map((image) => image.url))),
   ];
-  if (!urls.length) return { posts };
+  const incompletePosts = posts.filter(
+    (post) => (post.downloadedPhotos ?? post.images.length) < post.expectedPhotos,
+  ).length;
+  if (!urls.length && !incompletePosts) return { posts };
   let results = [];
   try {
     const files = urls.map((url) => {
@@ -46,7 +49,7 @@ export async function filterFacebookImages(
         throw Error("Invalid Facebook image path");
       return path.join(directory, path.basename(url));
     });
-    if (caseNumber) results = await recognize(caseNumber, files);
+    if (caseNumber && files.length) results = await recognize(caseNumber, files);
   } catch {
     // Preserve the original selection if OCR cannot run.
   }
@@ -60,15 +63,18 @@ export async function filterFacebookImages(
   ).length;
   const status = matches.size
     ? "matched"
-    : checked === urls.length
-      ? "no_match"
-      : "unreadable";
+    : incompletePosts
+      ? "incomplete"
+      : checked === urls.length
+        ? "no_match"
+        : "unreadable";
   return {
     caseFilter: {
       status,
       checked,
       kept: matches.size || urls.length,
       total: urls.length,
+      incompletePosts,
     },
     posts: matches.size
       ? posts.flatMap((post) => {

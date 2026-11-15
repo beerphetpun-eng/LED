@@ -101,6 +101,14 @@ export function PropertyDetails({
   }
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const caseFilter = p.facebook?.caseFilter;
+  const incompleteFacebookPosts =
+    caseFilter?.incompletePosts ??
+    p.facebook?.posts.filter(
+      (post) =>
+        post.expectedPhotos != null &&
+        (post.downloadedPhotos ?? post.images.length) < post.expectedPhotos,
+    ).length ??
+    0;
   const next = p.auctionDates
     .map(auctionDay)
     .filter((d) => d >= today())
@@ -514,10 +522,14 @@ export function PropertyDetails({
                   {caseFilter && (
                     <p className="small">
                       {caseFilter.status === "matched"
-                        ? `OCR พบเลขคดี ${p.caseNumber} ใน ${caseFilter.kept} จาก ${caseFilter.total} รูป`
-                        : caseFilter.status === "no_match"
-                          ? `OCR ไม่พบเลขคดี ${p.caseNumber} จึงเก็บทั้ง ${caseFilter.total} รูป`
-                          : `OCR อ่านเลขคดีได้ไม่ครบ จึงเก็บทั้ง ${caseFilter.total} รูป`}
+                        ? `พบเลขคดี ${p.caseNumber} ใน ${caseFilter.kept} จาก ${caseFilter.total} รูปที่ดึงได้`
+                        : incompleteFacebookPosts || caseFilter.status === "incomplete"
+                          ? `ตรวจรูปยังไม่ครบ ตรวจแล้ว ${caseFilter.checked} รูป จึงยังสรุปผลไม่ได้`
+                          : caseFilter.status === "no_match"
+                            ? `OCR ไม่พบเลขคดี ${p.caseNumber} จึงเก็บทั้ง ${caseFilter.total} รูป`
+                            : `OCR อ่านเลขคดีได้ไม่ครบ จึงเก็บทั้ง ${caseFilter.total} รูป`}
+                      {caseFilter.status === "matched" && incompleteFacebookPosts > 0 &&
+                        ` · ยังดึงรูปไม่ครบ ${incompleteFacebookPosts} โพสต์`}
                       {caseFilter.checked < caseFilter.total &&
                         ` · อ่านได้ ${caseFilter.checked} รูป`}
                     </p>
