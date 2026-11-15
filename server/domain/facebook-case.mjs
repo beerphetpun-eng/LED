@@ -22,10 +22,12 @@ export function caseBoxes(lines, caseNumber, width, height) {
         for (let i = 0; i < value.length; i++) boxes.push(symbol.bbox);
       }
     }
-    for (const match of text.matchAll(/[\p{L}]+\d+\/\d{2,4}(?!\d)/gu)) {
+    for (const match of text.matchAll(/([\p{L}]+)(\d+)\/(\d{2,4})(?!\d)/gu)) {
+      const [, photoPrefix, photoNumber, photoYear] = match;
       if (
-        match[0] !== `${prefix}${number}/${year}` &&
-        match[0] !== `${prefix}${number}/${year.slice(-2)}`
+        photoPrefix.replace(/E$/, "") !== prefix.replace(/E$/, "") ||
+        photoNumber !== number ||
+        (photoYear !== year && photoYear !== year.slice(-2))
       )
         continue;
       const symbols = boxes.slice(match.index, match.index + match[0].length);

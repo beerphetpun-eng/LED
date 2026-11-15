@@ -18,6 +18,29 @@ test("matches Thai digits and short Buddhist years without matching another case
   assert.deepEqual(caseBoxes(lines, "ผบ.594/2560", 100, 100), []);
 });
 
+test("matches the same case with or without a trailing E in the prefix", () => {
+  const bbox = { x0: 10, y0: 20, x1: 65, y1: 35 };
+  for (const [target, examples] of [
+    ["พ.1854 / 2563", ["พ1854/63", "พ.1854/63", "พE1854/63"]],
+    ["ผบ.1066 / 2560", ["ผบ1066/60", "ผบ.1066/60", "ผบE1066/60"]],
+  ]) {
+    for (const text of examples)
+      assert.equal(
+        caseBoxes([{ words: [{ text, bbox }] }], target, 100, 100).length,
+        1,
+      );
+  }
+  assert.deepEqual(
+    caseBoxes(
+      [{ words: [{ text: "พE1066/60", bbox }] }],
+      "ผบ.1066/2560",
+      100,
+      100,
+    ),
+    [],
+  );
+});
+
 test("filters across posts when there is a match and keeps every image otherwise", async () => {
   const photos = ["/evidence/fb-123.jpg", "/evidence/fb-456.jpg"];
   const posts = photos.map((url) => ({ images: [{ url }] }));

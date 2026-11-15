@@ -27,10 +27,35 @@ export async function readFacebookPosts(page) {
           );
           if (postLinks.size > 1) break;
           if (photos.length && parent.innerText.includes("ขายทอดตลาด")) {
+            const more = photos.find((a) =>
+              /^\+\s*\d+$/.test(a.innerText.trim()),
+            );
+            const photoUrls = [
+              ...new Map(
+                photos.flatMap((a) => {
+                  const url = new URL(a.href);
+                  const id = url.searchParams.get("fbid");
+                  return /^\d+$/.test(id || "") &&
+                    /^\/photo\/?$/.test(url.pathname) &&
+                    [
+                      "www.facebook.com",
+                      "web.facebook.com",
+                      "facebook.com",
+                    ].includes(url.hostname)
+                    ? [[id, a.href]]
+                    : [];
+                }),
+              ).values(),
+            ];
+            if (!photoUrls.length) break;
             result.push({
               url: link.href.split("?")[0],
               text: parent.innerText,
-              photoUrls: [...new Set(photos.map((a) => a.href))],
+              photoUrls,
+              albumStart: more?.href,
+              expectedPhotos:
+                photoUrls.length +
+                Number(more?.innerText.replace(/\D/g, "") || 0),
             });
             break;
           }
@@ -45,16 +70,9 @@ export function createFacebookSource(
 ) {
   let busy = false;
   async function dismiss(page) {
-    const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).first();
-    if (
-      (await page
-        .getByRole("textbox", {
-          name: /Email address or phone number|อีเมลหรือหมายเลขโทรศัพท์/,
-        })
-        .isVisible()) &&
-      (await close.isVisible())
-    )
-      await close.click();
+    const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).last();
+    if (await close.isVisible())
+      await close.click({ timeout: 4000 }).catch(() => {});
   }
   async function search(property, nearbyDays = 7) {
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
@@ -108,147 +126,141 @@ export function createFacebookSource(
         warnings = [];
       for (const candidate of candidates) {
         const images = [];
-        let album,
-          seen = new Set(),
-          previousSrc = "",
-          limitedNavigation = false;
-        try {
-          // Use photo links observed in the feed; virtualized anchors may no longer be clickable.
-          const firstId = new URL(candidate.photoUrls[0]).searchParams.get(
-            "fbid",
+        const seen = new Set();
+        const downloadedSources = new Set();
+        let previousSrc = "";
+        const start = new URL(candidate.albumStart || candidate.photoUrls[0]);
+        const album = start.searchParams.get("set");
+        const capture = async (photoId) => {
+          await page.waitForFunction(
+            (previous) =>
+              [...document.images].some(
+                (i) =>
+                  i.getBoundingClientRect().width > 350 &&
+                  i.naturalWidth > 500 &&
+                  i.complete &&
+                  i.currentSrc !== previous,
+              ),
+            previousSrc,
+            { timeout: 20000 },
           );
-          if (!firstId || !/^\d+$/.test(firstId))
-            throw Error("ไม่พบรหัสภาพในโพสต์");
-          await page.goto(candidate.photoUrls[0], {
-            waitUntil: "domcontentloaded",
-            timeout: 60000,
-          });
-          await page.waitForURL((u) => u.searchParams.get("fbid") === firstId, {
-            timeout: 15000,
-          });
-          album = new URL(page.url()).searchParams.get("set");
-          for (let index = 0; index < maxPhotos; index++) {
-            const photoId = new URL(page.url()).searchParams.get("fbid");
-            if (
-              !photoId ||
-              !/^\d+$/.test(photoId) ||
-              seen.has(photoId) ||
-              new URL(page.url()).searchParams.get("set") !== album
-            )
-              break;
-            seen.add(photoId);
-            await page.waitForFunction(
-              (previous) =>
-                [...document.images].some(
-                  (i) =>
-                    i.getBoundingClientRect().width > 350 &&
-                    i.naturalWidth > 500 &&
-                    i.complete &&
-                    i.currentSrc !== previous,
-                ),
+          const src = await page
+            .locator("img")
+            .evaluateAll(
+              (imgs, previous) =>
+                imgs
+                  .filter(
+                    (i) =>
+                      i.getBoundingClientRect().width > 350 &&
+                      i.naturalWidth > 500 &&
+                      i.complete &&
+                      i.currentSrc !== previous,
+                  )
+                  .sort(
+                    (a, b) =>
+                      b.getBoundingClientRect().width *
+                        b.getBoundingClientRect().height -
+                      a.getBoundingClientRect().width *
+                        a.getBoundingClientRect().height,
+                  )[0]?.currentSrc,
               previousSrc,
-              { timeout: 20000 },
             );
-            const src = await page
-              .locator("img")
-              .evaluateAll(
-                (imgs, previous) =>
-                  imgs
-                    .filter(
-                      (i) =>
-                        i.getBoundingClientRect().width > 350 &&
-                        i.naturalWidth > 500 &&
-                        i.complete &&
-                        i.currentSrc !== previous,
-                    )
-                    .sort(
-                      (a, b) =>
-                        b.getBoundingClientRect().width *
-                          b.getBoundingClientRect().height -
-                        a.getBoundingClientRect().width *
-                          a.getBoundingClientRect().height,
-                    )[0]?.currentSrc,
-                previousSrc,
-              );
-            if (!src) throw Error("ไม่พบภาพต้นฉบับ");
-            previousSrc = src;
-            const url = new URL(src);
-            if (
-              url.protocol !== "https:" ||
-              !(
-                url.hostname.endsWith(".fbcdn.net") ||
-                url.hostname.endsWith(".facebook.com")
-              )
+          if (!src) throw Error("ไม่พบภาพต้นฉบับ");
+          previousSrc = src;
+          if (downloadedSources.has(src))
+            throw Error("ภาพเดิมยังแสดงอยู่ในตัวดูรูป");
+          const url = new URL(src);
+          if (
+            url.protocol !== "https:" ||
+            !(
+              url.hostname.endsWith(".fbcdn.net") ||
+              url.hostname.endsWith(".facebook.com")
             )
-              throw Error("ภาพมาจากโดเมนที่ไม่รองรับ");
-            const response = await context.request.get(src, {
+          )
+            throw Error("ภาพมาจากโดเมนที่ไม่รองรับ");
+          const response = await context.request.get(src, {
+            timeout: 30000,
+            maxRedirects: 0,
+          });
+          if (!response.ok())
+            throw Error("โหลดรูป Facebook ไม่สำเร็จ HTTP " + response.status());
+          const type = response.headers()["content-type"]?.split(";")[0],
+            extension = {
+              "image/jpeg": "jpg",
+              "image/png": "png",
+              "image/webp": "webp",
+            }[type];
+          if (!extension) throw Error("รูปแบบรูปภาพไม่รองรับ");
+          const filename = `fb-${photoId}-${runId}.${extension}`;
+          await writeFile(path.join(staging, filename), await response.body());
+          images.push({
+            url: "/evidence/" + filename,
+            sourceUrl: page.url(),
+            photoId,
+          });
+          downloadedSources.add(src);
+        };
+        for (const link of [start.href, ...candidate.photoUrls]) {
+          if (seen.size >= maxPhotos) break;
+          const seed = new URL(link);
+          if (
+            !seed.searchParams.get("fbid") ||
+            seen.has(seed.searchParams.get("fbid"))
+          )
+            continue;
+          try {
+            await page.goto(link, {
+              waitUntil: "domcontentloaded",
               timeout: 30000,
-              maxRedirects: 0,
             });
-            if (!response.ok())
-              throw Error(
-                "โหลดรูป Facebook ไม่สำเร็จ HTTP " + response.status(),
-              );
-            const type = response.headers()["content-type"]?.split(";")[0],
-              extension = {
-                "image/jpeg": "jpg",
-                "image/png": "png",
-                "image/webp": "webp",
-              }[type];
-            if (!extension) throw Error("รูปแบบรูปภาพไม่รองรับ");
-            const filename = `fb-${photoId}-${runId}.${extension}`;
-            await writeFile(
-              path.join(staging, filename),
-              await response.body(),
-            );
-            images.push({
-              url: "/evidence/" + filename,
-              sourceUrl: page.url(),
-              photoId,
-            });
-            const next = page.getByRole("button", {
-              name: /^(Next photo|รูปภาพถัดไป)$/,
-            });
-            try {
-              await next.waitFor({ state: "visible", timeout: 8000 });
-            } catch {
-              limitedNavigation = true;
-              const other = candidate.photoUrls.find(
-                (value) => !seen.has(new URL(value).searchParams.get("fbid")),
-              );
-              if (!other) break;
-              await page.goto(other, {
-                waitUntil: "domcontentloaded",
-                timeout: 60000,
-              });
-              continue;
+            while (seen.size < maxPhotos) {
+              const current = new URL(page.url());
+              const photoId = current.searchParams.get("fbid");
+              if (
+                !/^\d+$/.test(photoId || "") ||
+                seen.has(photoId) ||
+                current.searchParams.get("set") !== album
+              )
+                break;
+              await capture(photoId);
+              seen.add(photoId);
+              if (
+                link !== start.href ||
+                images.length >= candidate.expectedPhotos
+              )
+                break;
+              await dismiss(page);
+              try {
+                await page
+                  .getByRole("button", { name: /^(Next photo|รูปภาพถัดไป)$/ })
+                  .click({ timeout: 5500 });
+                await page.waitForURL(
+                  (url) => url.searchParams.get("fbid") !== photoId,
+                  { timeout: 5500 },
+                );
+              } catch {
+                // The remaining public links can still be opened individually.
+                break;
+              }
             }
-            const oldUrl = page.url();
-            await next.click();
-            await page.waitForURL((u) => u.href !== oldUrl, { timeout: 10000 });
-            await page.waitForTimeout(500);
+          } catch (e) {
+            warnings.push(
+              `อ่านรูปบางส่วนไม่สำเร็จ: ${e.message.split("\n")[0]}`,
+            );
           }
-          if (seen.size >= maxPhotos)
-            warnings.push(
-              `อ่านถึงขีดจำกัด ${maxPhotos} รูป กรุณาดูโพสต์ต้นฉบับเพิ่มเติม`,
-            );
-          if (limitedNavigation)
-            warnings.push(
-              "Facebook ไม่แสดงปุ่มอ่านอัลบั้มต่อ เก็บเฉพาะลิงก์ภาพที่พบในหน้าเพจ อาจมีภาพเพิ่มเติมในโพสต์ต้นฉบับ",
-            );
-          if (images.length < candidate.photoUrls.length)
-            warnings.push(
-              `เก็บได้ ${images.length} รูป แต่โพสต์มีภาพอย่างน้อย ${candidate.photoUrls.length} รูป กรุณาดูโพสต์ต้นฉบับเพิ่ม`,
-            );
-        } catch (e) {
-          warnings.push(`อ่านรูปบางส่วนไม่สำเร็จ: ${e.message.split("\n")[0]}`);
         }
+        if (images.length < candidate.expectedPhotos)
+          warnings.push(
+            `เก็บได้ ${images.length} จากอย่างน้อย ${candidate.expectedPhotos} รูปที่ Facebook ระบุ กรุณาดูโพสต์ต้นฉบับเพิ่มเติม`,
+          );
         posts.push({
           url: candidate.url,
           text: candidate.text,
           match: candidate.match,
           images,
           rowMatched: false,
+          expectedPhotos: candidate.expectedPhotos,
+          downloadedPhotos: images.length,
         });
       }
       const filtered = await filterFacebookImages(

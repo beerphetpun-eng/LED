@@ -44,6 +44,8 @@ export type FacebookResult = {
       caseBoxes?: CaseBox[];
     }[];
     rowMatched: boolean;
+    expectedPhotos?: number;
+    downloadedPhotos?: number;
   }[];
 };
 export type Property = {
