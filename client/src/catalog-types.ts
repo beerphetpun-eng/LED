@@ -27,6 +27,7 @@ export type FacebookResult = {
   note: string;
   scannedPosts: number;
   warnings: string[];
+  requiresSignIn?: boolean;
   caseFilter?: {
     status: "matched" | "no_match" | "unreadable" | "incomplete";
     checked: number;

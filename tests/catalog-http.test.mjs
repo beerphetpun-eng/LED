@@ -29,7 +29,9 @@ test("database outages preserve server identity and malformed JSON stays out of 
   assert.equal(nonLocalHost, 403);
   const health = await fetch(url + "/api/health");
   assert.equal(health.status, 503);
-  assert.equal((await health.json()).source, "LED + LandsMaps");
+  const healthBody = await health.json();
+  assert.equal(healthBody.source, "LED + LandsMaps");
+  assert.equal(healthBody.capabilities.facebookAlbumCoverage, true);
   const malformed = await fetch(url + "/api/sync/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },

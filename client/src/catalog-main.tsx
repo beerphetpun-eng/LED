@@ -28,7 +28,13 @@ import type {
   UserNotes,
   CaseBox,
 } from "./catalog-types";
-import { api, mapParcels, money, time } from "./catalog-api";
+import {
+  api,
+  mapParcels,
+  money,
+  requireFacebookAlbumBackend,
+  time,
+} from "./catalog-api";
 import { approximateLocation, mapLocationLabel } from "./approximate-location";
 import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
@@ -265,6 +271,7 @@ function App() {
     if (!selected) return;
     const id = selected.id;
     await report("กำลังอ่าน Facebook", async () => {
+      await requireFacebookAlbumBackend();
       const p = await api<Property>("/properties/" + id + "/facebook", "POST", {
         nearbyDays: days,
         postUrl,

@@ -129,28 +129,31 @@ export function createFacebookSource(
     if (additionalPosts.some((url) => !postUrl.test(url)))
       throw Error("ใช้ลิงก์โพสต์จากเพจสำนักงานบังคับคดีเชียงใหม่ (ledcm2)");
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
-    if (signIn)
-      throw Error("ปิดหน้าต่าง Facebook หลังเข้าสู่ระบบ แล้วกดดึงรูปอีกครั้ง");
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
     busy = true;
-    let browser, context, staging;
+    const interactiveContext = signIn;
+    let browser,
+      context = interactiveContext,
+      page,
+      staging;
     const runId = randomUUID();
     try {
       staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
-      if (profilePath) {
+      if (!context && profilePath) {
         context = await chromium.launchPersistentContext(profilePath, {
           ...profileOptions,
           headless: true,
         });
-      } else {
+      } else if (!context) {
         browser = await chromium.launch({ headless: true });
         context = await browser.newContext(browserOptions);
       }
-      const page = await context.newPage();
+      page = await context.newPage();
       page.setDefaultTimeout(15000);
       const found = new Map();
       const warnings = [];
+      let loginRequired = false;
       let unchanged = 0;
       try {
         await page.goto(PAGE, {
@@ -373,8 +376,7 @@ export function createFacebookSource(
                   hasText:
                     /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
                 });
-                if (await login.first().isVisible())
-                  warnings.push("Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปถัดไป");
+                if (await login.first().isVisible()) loginRequired = true;
                 // Other links visible on the post can still be read directly.
                 break;
               }
@@ -424,6 +426,10 @@ export function createFacebookSource(
         property.caseNumber,
         staging,
       );
+      const requiresSignIn =
+        loginRequired && filtered.caseFilter?.status === "incomplete";
+      if (requiresSignIn)
+        warnings.push("Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปถัดไป");
       const retained = new Set(
         filtered.posts.flatMap((post) => post.images.map((image) => image.url)),
       );
@@ -439,6 +445,7 @@ export function createFacebookSource(
         ...filtered,
         albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
         warnings,
+        requiresSignIn,
         scannedPosts: found.size,
         nearbyDays,
         note:
@@ -457,7 +464,8 @@ export function createFacebookSource(
     } finally {
       try {
         try {
-          await context?.close();
+          if (interactiveContext) await page?.close().catch(() => {});
+          else await context?.close();
         } finally {
           await browser?.close();
         }

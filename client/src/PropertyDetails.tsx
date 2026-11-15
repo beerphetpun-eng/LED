@@ -10,7 +10,15 @@ import {
 } from "lucide-react";
 import type { CaseBox, Property, UserNotes } from "./catalog-types";
 import { EvidenceImage } from "./EvidenceImage";
-import { api, mapParcels, money, time, today, auctionDay } from "./catalog-api";
+import {
+  api,
+  mapParcels,
+  money,
+  requireFacebookAlbumBackend,
+  time,
+  today,
+  auctionDay,
+} from "./catalog-api";
 import { approximateLocation } from "./approximate-location";
 
 function EvidenceStatus({ property }: { property: Property }) {
@@ -505,10 +513,11 @@ export function PropertyDetails({
                 disabled={fbBusy || fbSignInBusy}
                 onClick={async () => {
                   setFbBusy(true);
+                  setFbSignInMessage("");
                   try {
                     await onFacebook(days, fbPostUrl);
-                  } catch {
-                    // The notification menu reports the failure.
+                  } catch (error) {
+                    setFbSignInMessage((error as Error).message);
                   } finally {
                     setFbBusy(false);
                   }
@@ -525,9 +534,10 @@ export function PropertyDetails({
                   setFbSignInBusy(true);
                   setFbSignInMessage("");
                   try {
+                    await requireFacebookAlbumBackend();
                     await api("/facebook/sign-in", "POST");
                     setFbSignInMessage(
-                      "เข้าสู่ระบบในหน้าต่าง Facebook แล้วปิดหน้าต่างก่อนกดดึงรูปอีกครั้ง",
+                      "เข้าสู่ระบบในหน้าต่าง Facebook แล้วกลับมากดดึงรูปอีกครั้ง",
                     );
                   } catch (error) {
                     setFbSignInMessage((error as Error).message);
@@ -556,6 +566,12 @@ export function PropertyDetails({
                   <p className="small muted">
                     ตรวจเมื่อ {time(p.facebook.checkedAt)} · {p.facebook.note}
                   </p>
+                  {p.facebook.requiresSignIn && (
+                    <p className="small inline-error" role="status">
+                      Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปที่เหลือ
+                      ใช้ปุ่มเปิดหน้าลงชื่อเข้าใช้แล้วกดดึงรูปอีกครั้ง
+                    </p>
+                  )}
                   {caseFilter && (
                     <p className="small">
                       {caseFilter.status === "matched"
@@ -585,10 +601,9 @@ export function PropertyDetails({
                         · {post.match.date} <ExternalLink size={13} />
                       </a>
                       {post.expectedPhotos != null &&
-                        post.downloadedPhotos != null &&
-                        post.downloadedPhotos < post.expectedPhotos && (
+                        post.downloadedPhotos != null && (
                           <p className="small muted">
-                            ดึงได้ {post.downloadedPhotos} จากอย่างน้อย{" "}
+                            ดึงได้ {post.downloadedPhotos} จาก{" "}
                             {post.expectedPhotos} รูป
                           </p>
                         )}

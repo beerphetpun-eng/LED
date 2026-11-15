@@ -32,14 +32,21 @@ export function createCatalogHttp({
     next();
   });
   app.get("/api/health", async (req, res) => {
+    const capabilities = { facebookAlbumCoverage: true };
     try {
       await db.health();
-      res.json({ status: "ok", source: "LED + LandsMaps", version: 2 });
+      res.json({
+        status: "ok",
+        source: "LED + LandsMaps",
+        version: 2,
+        capabilities,
+      });
     } catch {
       res.status(503).json({
         status: "unavailable",
         source: "LED + LandsMaps",
         version: 2,
+        capabilities,
         error: "เชื่อมต่อฐานข้อมูลไม่สำเร็จ",
       });
     }
