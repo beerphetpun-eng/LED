@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
-import { readFacebookPosts } from "../server/infrastructure/facebook-source.mjs";
+import {
+  navigateFacebookPhoto,
+  readFacebookPosts,
+} from "../server/infrastructure/facebook-source.mjs";
 
 test("public feed extraction keeps post text and observed photo links together", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -23,6 +26,35 @@ test("public feed extraction keeps post text and observed photo links together",
     assert.equal(posts[1].photoUrls.length, 2);
     assert.match(posts[1].albumStart, /fbid=457/);
     assert.equal(posts[1].expectedPhotos, 17);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("refreshes the current public photo and dismisses the prompt before advancing", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const current = new URL(
+      "https://web.facebook.com/photo/?fbid=456&set=pcb.2",
+    );
+    let loads = 0;
+    await page.route("https://web.facebook.com/photo/**", async (route) => {
+      await route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body:
+          ++loads === 1
+            ? `<button onclick="document.querySelector('dialog').showModal()">Next photo</button><dialog>See more on Facebook</dialog>`
+            : `<dialog open>See more on Facebook <button onclick="this.closest('dialog').close()">Close</button></dialog><button onclick="history.pushState({}, '', '?fbid=457&set=pcb.2')">Next photo</button>`,
+      });
+    });
+    await page.goto(current.href);
+    assert.deepEqual(await navigateFacebookPhoto(page, current), {
+      advanced: true,
+      loginRequired: false,
+    });
+    assert.equal(loads, 2);
+    assert.equal(new URL(page.url()).searchParams.get("fbid"), "457");
   } finally {
     await browser.close();
   }

@@ -9,6 +9,56 @@ import { filterFacebookImages } from "./facebook-image-filter.mjs";
 const PAGE = "https://web.facebook.com/ledcm2";
 const postUrl =
   /^https:\/\/(?:web\.|www\.)?facebook\.com\/ledcm2\/posts\/[A-Za-z0-9]+\/?$/;
+
+async function dismiss(page) {
+  const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).last();
+  if (await close.isVisible())
+    await close.click({ timeout: 4000 }).catch(() => {});
+}
+
+export async function navigateFacebookPhoto(page, current, direction = "next") {
+  const photoId = current.searchParams.get("fbid");
+  const album = current.searchParams.get("set");
+  const login = page
+    .getByRole("dialog")
+    .filter({
+      hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
+    })
+    .first();
+  const name =
+    direction === "next"
+      ? /^(Next photo|รูปภาพถัดไป)$/
+      : /^(Previous photo|รูปภาพก่อนหน้า)$/;
+  let loginRequired = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) {
+      // Reload the current public photo to reset the viewer before using its controls again.
+      const options = { waitUntil: "domcontentloaded", timeout: 20000 };
+      if (page.url() === current.href) await page.reload(options);
+      else await page.goto(current.href, options);
+    }
+    await dismiss(page);
+    try {
+      await page.getByRole("button", { name }).click({ timeout: 5500 });
+      await page.waitForURL(
+        (url) => {
+          const nextId = url.searchParams.get("fbid");
+          return (
+            /^\d+$/.test(nextId || "") &&
+            nextId !== photoId &&
+            url.searchParams.get("set") === album
+          );
+        },
+        { timeout: 5500 },
+      );
+      return { advanced: true, loginRequired: false };
+    } catch {
+      loginRequired ||= await login.isVisible();
+    }
+  }
+  return { advanced: false, loginRequired };
+}
+
 export async function readFacebookPosts(page) {
   return await page
     .locator('a[href*="/ledcm2/posts/"]')
@@ -121,11 +171,6 @@ export function createFacebookSource(
     } finally {
       busy = false;
     }
-  }
-  async function dismiss(page) {
-    const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).last();
-    if (await close.isVisible())
-      await close.click({ timeout: 4000 }).catch(() => {});
   }
   async function search(
     property,
@@ -335,14 +380,24 @@ export function createFacebookSource(
           downloadedSources.add(src);
           photoSources.set(photoId, src);
         };
-        for (const link of new Set(
+        const links = new Set(
           [startLink, candidate.albumStart, ...candidate.photoUrls].filter(
             Boolean,
           ),
-        )) {
+        );
+        const visits = [...links].map((link) => {
+          const traverse = link === startLink || link === candidate.albumStart;
+          return { link, traverse, direction: "next" };
+        });
+        if (startLink && expectedPhotos > links.size)
+          visits.push({
+            link: startLink,
+            traverse: true,
+            direction: "previous",
+          });
+        for (const { link, traverse, direction } of visits) {
           if (seen.size >= expectedPhotos) break;
           const seed = new URL(link);
-          const traverse = link === startLink || link === candidate.albumStart;
           if (seen.has(seed.searchParams.get("fbid")) && !traverse) continue;
           try {
             await page.goto(link, {
@@ -375,24 +430,13 @@ export function createFacebookSource(
                 previousSrc = photoSources.get(photoId) || "";
               }
               if (!traverse || seen.size >= expectedPhotos) break;
-              await dismiss(page);
-              try {
-                await page
-                  .getByRole("button", { name: /^(Next photo|รูปภาพถัดไป)$/ })
-                  .click({ timeout: 5500 });
-                await page.waitForURL(
-                  (url) => url.searchParams.get("fbid") !== photoId,
-                  { timeout: 5500 },
-                );
-              } catch {
-                const login = page.getByRole("dialog").filter({
-                  hasText:
-                    /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
-                });
-                if (await login.first().isVisible()) loginRequired = true;
-                // Other links visible on the post can still be read directly.
-                break;
-              }
+              const step = await navigateFacebookPhoto(
+                page,
+                current,
+                direction,
+              );
+              loginRequired ||= step.loginRequired;
+              if (!step.advanced) break;
             }
           } catch (e) {
             warnings.push(
