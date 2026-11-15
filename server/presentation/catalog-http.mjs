@@ -109,10 +109,10 @@ export function createCatalogHttp({
     const value = req.body?.postUrl;
     if (value != null && (typeof value !== "string" || value.length > 1000))
       throw Error("ลิงก์โพสต์ Facebook ไม่ถูกต้อง");
-    const additionalPosts = value?.trim()
+    const postUrls = value?.trim()
       ? [value.trim().split(/[?#]/)[0].replace(/\/$/, "")]
       : [];
-    const result = await facebook.search(p, days, { additionalPosts });
+    const result = await facebook.search(p, days, { postUrls });
     await db.updateSource(p.id, { facebook: result });
     for (const warning of result.warnings)
       await db.alert("Facebook: " + warning);

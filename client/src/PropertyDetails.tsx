@@ -500,7 +500,7 @@ export function PropertyDetails({
                 </select>
               </label>
               <details>
-                <summary>ระบุลิงก์โพสต์ Facebook</summary>
+                <summary>ระบุลิงก์เพื่อดึงเฉพาะโพสต์นั้น</summary>
                 <input
                   type="url"
                   aria-label="ลิงก์โพสต์ Facebook"
