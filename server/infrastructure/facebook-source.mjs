@@ -7,6 +7,8 @@ import { matchPost } from "../domain/catalog.mjs";
 import { filterFacebookImages } from "./facebook-image-filter.mjs";
 
 const PAGE = "https://web.facebook.com/ledcm2";
+const postUrl =
+  /^https:\/\/(?:web\.|www\.)?facebook\.com\/ledcm2\/posts\/[A-Za-z0-9]+\/?$/;
 export async function readFacebookPosts(page) {
   return await page
     .locator('a[href*="/ledcm2/posts/"]')
@@ -74,7 +76,11 @@ export function createFacebookSource(
     if (await close.isVisible())
       await close.click({ timeout: 4000 }).catch(() => {});
   }
-  async function search(property, nearbyDays = 7) {
+  async function search(
+    property,
+    nearbyDays = 7,
+    { additionalPosts = [] } = {},
+  ) {
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
@@ -90,15 +96,26 @@ export function createFacebookSource(
       });
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
-      await page.goto(PAGE, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await dismiss(page);
-      await page
-        .locator('a[href*="/ledcm2/posts/"]')
-        .first()
-        .waitFor({ timeout: 25000 });
       const found = new Map();
+      const warnings = [];
       let unchanged = 0;
-      for (let scroll = 0; scroll < maxScrolls; scroll++) {
+      try {
+        await page.goto(PAGE, {
+          waitUntil: "domcontentloaded",
+          timeout: 60000,
+        });
+        await dismiss(page);
+        await page
+          .locator('a[href*="/ledcm2/posts/"]')
+          .first()
+          .waitFor({ timeout: 25000 });
+      } catch {
+        unchanged = 5;
+        warnings.push(
+          "Facebook ไม่แสดงโพสต์ในฟีด จะลองเปิดโพสต์ที่บันทึกไว้โดยตรง",
+        );
+      }
+      for (let scroll = 0; scroll < maxScrolls && unchanged < 5; scroll++) {
         for (const button of (
           await page
             .getByRole("button", { name: /^(See more|ดูเพิ่มเติม)$/ })
@@ -110,9 +127,33 @@ export function createFacebookSource(
         for (const p of posts) found.set(p.url, p);
         unchanged = before === found.size ? unchanged + 1 : 0;
         if (unchanged >= 5) break;
+        await page.mouse.move(700, 840);
         await page.mouse.wheel(0, 1800);
         await page.waitForTimeout(1200);
         await dismiss(page);
+      }
+      const knownUrls = new Set([
+        ...(property.facebook?.posts || []).map(({ url }) => url),
+        ...additionalPosts,
+      ]);
+      for (const url of knownUrls) {
+        if (!postUrl.test(url) || found.has(url)) continue;
+        try {
+          await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          await page
+            .locator('a[href*="/photo"]')
+            .first()
+            .waitFor({ timeout: 10000 });
+          const post = (await readFacebookPosts(page)).find(
+            (entry) => entry.url.replace(/\/$/, "") === url.replace(/\/$/, ""),
+          );
+          if (post) found.set(post.url, post);
+        } catch {
+          warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
+        }
       }
       const candidates = [...found.values()]
         .map((p) => ({
@@ -122,8 +163,7 @@ export function createFacebookSource(
         .filter((p) => p.match)
         .sort((a, b) => a.match.days - b.match.days)
         .slice(0, maxPosts);
-      const posts = [],
-        warnings = [];
+      const posts = [];
       for (const candidate of candidates) {
         const images = [];
         const seen = new Set();
