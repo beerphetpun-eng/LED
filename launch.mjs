@@ -17,6 +17,12 @@ try {
     signal: AbortSignal.timeout(1500),
   }).then((r) => r.json());
   if (health.source === "LED + LandsMaps") {
+    if (!health.capabilities?.facebookAlbumCoverage) {
+      console.error(
+        "Land Radar is running an older server. Stop the old server before opening Start.cmd again.",
+      );
+      process.exit(1);
+    }
     console.log("Land Radar is already running: http://127.0.0.1:5080");
     if (!noBrowser)
       execFile(
