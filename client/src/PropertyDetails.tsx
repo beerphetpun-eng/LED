@@ -533,6 +533,14 @@ export function PropertyDetails({
                           : `วันที่ห่าง ${post.match.days} วัน`}{" "}
                         · {post.match.date} <ExternalLink size={13} />
                       </a>
+                      {post.expectedPhotos != null &&
+                        post.downloadedPhotos != null &&
+                        post.downloadedPhotos < post.expectedPhotos && (
+                          <p className="small muted">
+                            ดึงได้ {post.downloadedPhotos} จากอย่างน้อย{" "}
+                            {post.expectedPhotos} รูป
+                          </p>
+                        )}
                       <details>
                         <summary>อ่านข้อความโพสต์</summary>
                         <p>{post.text}</p>

@@ -9,7 +9,7 @@ test("public feed extraction keeps post text and observed photo links together",
     const page = await browser.newPage();
     await page.setContent(`<main>
    <article><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">today</a><p>ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
-   <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a></article>
+   <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a><a href="https://web.facebook.com/photo/?fbid=457&set=pcb.2">+15</a><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2&ref=extra">duplicate</a></article>
    <article><a href="https://web.facebook.com/ledcm2/posts/other">other</a><p>กิจกรรมสำนักงาน</p><a href="https://web.facebook.com/photo?fbid=789">photo</a></article>
   </main>`);
     const posts = await readFacebookPosts(page);
@@ -19,6 +19,9 @@ test("public feed extraction keeps post text and observed photo links together",
     assert.equal(posts[0].photoUrls.length, 1);
     assert.match(posts[0].photoUrls[0], /fbid=123/);
     assert.match(posts[1].photoUrls[0], /fbid=456/);
+    assert.equal(posts[1].photoUrls.length, 2);
+    assert.match(posts[1].albumStart, /fbid=457/);
+    assert.equal(posts[1].expectedPhotos, 17);
   } finally {
     await browser.close();
   }
