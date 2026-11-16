@@ -44,6 +44,7 @@ export function createCatalogHttp({
       facebookAlbumCoverage: true,
       facebookPublicExactDates: true,
       facebookAuctionSchedule: true,
+      facebookFeedPermalinks: true,
       deedRefresh: true,
     };
     try {
