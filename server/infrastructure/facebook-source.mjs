@@ -1,17 +1,15 @@
 import { chromium } from "playwright";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import {
   bangkokDay,
   auctionISO,
   facebookPublishedDay,
-  facebookPublicationRelevant,
-  matchPost,
+  isFacebookAuctionCaption,
   selectFacebookPosts,
 } from "../domain/catalog.mjs";
-import { filterFacebookImages } from "./facebook-image-filter.mjs";
+import {
+  downloadFacebookAlbum,
+  existingFacebookImages,
+} from "./facebook-album.mjs";
 
 const PAGE = "https://web.facebook.com/ledcm2";
 const postUrl =
@@ -208,506 +206,336 @@ export function nextFacebookArchiveLink(posts, auctionDates, checked) {
     .sort((a, b) => distance(a.publishedOn) - distance(b.publishedOn))[0]?.url;
 }
 
+function albumIdentity(post) {
+  if (post.albumKey) return post.albumKey;
+  const link =
+    post.photoUrls?.[0] ||
+    post.images?.find((image) =>
+      /^https:\/\/(?:web\.|www\.)?facebook\.com\/photo\/?\?/.test(
+        image.sourceUrl || "",
+      ),
+    )?.sourceUrl;
+  const album = link && new URL(link).searchParams.get("set");
+  return /^pcb\.\d+$/.test(album || "") ? album : post.url;
+}
+
+function completeAlbum(album) {
+  return (
+    Number.isSafeInteger(album.expectedPhotos) &&
+    album.expectedPhotos > 0 &&
+    album.images.length >= album.expectedPhotos
+  );
+}
+
 export function createFacebookSource(
   evidencePath,
   {
     maxScrolls = 20,
     postIndex,
+    readCatalog = async () => ({ dates: [], legacy: [] }),
     launchBrowser = () => chromium.launch({ headless: true }),
-  } = {},
+    downloadAlbum = downloadFacebookAlbum,
+  },
 ) {
-  let busy = false;
-  let indexTask, indexTimer, indexBrowser;
+  let task,
+    timer,
+    browser,
+    stopping = false;
   const feedOptions = {
     locale: "en-US",
     timezoneId: "Asia/Bangkok",
     viewport: { width: 1440, height: 1100 },
     acceptDownloads: false,
   };
-  async function savePostIndex(index, posts) {
-    if (!postIndex) return;
-    const entries = new Map(index.posts.map((p) => [p.url, p]));
-    for (const { url, publishedOn, text, expectedPhotos } of posts) {
-      if (!publishedOn || !postUrl.test(url)) continue;
-      const caption = truncatedCaption.test(text) ? "" : text;
-      const previous = entries.get(url);
-      entries.set(url, {
-        url,
-        publishedOn,
-        text: caption || previous?.text || "",
-        expectedPhotos: expectedPhotos || previous?.expectedPhotos,
-      });
-    }
-    await postIndex.write({
-      checkedAt: index.checkedAt,
-      posts: [...entries.values()],
-    });
-  }
 
-  async function indexFeed() {
+  async function syncLibrary(force) {
     const index = await postIndex.read();
-    if (Date.now() - Date.parse(index.checkedAt) < 6 * 3600000) return;
+    if (
+      !force &&
+      index.albums &&
+      Date.now() - Date.parse(index.checkedAt) < 6 * 3600000
+    )
+      return;
+    const { dates, legacy } = await readCatalog();
+    const references = new Map(
+      (index.posts || [])
+        .filter((post) => postUrl.test(post.url))
+        .map((post) => [post.url, post]),
+    );
+    const albums = new Map(
+      (index.albums || []).map((album) => [album.albumKey, album]),
+    );
     const found = new Map();
-    indexBrowser = await launchBrowser();
+    const warnings = [];
+    const save = (checkedAt = index.checkedAt) =>
+      postIndex.write({
+        checkedAt,
+        posts: [...references.values()],
+        albums: [...albums.values()],
+        warnings: [...new Set(warnings)],
+      });
     try {
-      const page = await indexBrowser.newPage(feedOptions);
-      await page.goto(PAGE, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await dismiss(page);
-      await collectPublicPosts(page, found, 8);
-      const alreadyRead = new Set(
-        index.posts.filter((post) => post.text).map((post) => post.url),
-      );
-      const previews = [...found.values()]
-        .filter(
-          (post) =>
-            truncatedCaption.test(post.text) && !alreadyRead.has(post.url),
-        )
-        .slice(0, 4);
-      for (const preview of previews) {
-        try {
-          await page.goto(preview.url, {
-            waitUntil: "domcontentloaded",
-            timeout: 12000,
-          });
-          const post = await readFacebookPermalink(page, preview.url);
-          if (post)
-            found.set(preview.url, {
-              ...post,
-              url: preview.url,
-              publishedOn: post.publishedOn || preview.publishedOn,
-            });
-        } catch {
-          /* Keep the observed public link for the next search. */
-        }
-      }
-      await savePostIndex(
-        { ...index, checkedAt: new Date().toISOString() },
-        found.values(),
-      );
-    } finally {
-      await indexBrowser.close();
-      indexBrowser = undefined;
-    }
-  }
-
-  function scheduleIndex() {
-    if (!postIndex || indexTimer) return;
-    indexTimer = setInterval(() => {
-      if (busy || indexTask) return;
-      indexTask = indexFeed()
-        .catch((error) =>
-          console.warn("Facebook index:", error.message.split("\n")[0]),
-        )
-        .finally(() => {
-          indexTask = undefined;
-        });
-    }, 15 * 60000);
-    indexTimer.unref();
-  }
-
-  async function stopIndex() {
-    clearInterval(indexTimer);
-    await indexBrowser?.close().catch(() => {});
-    await indexTask;
-  }
-  async function search(property, { postUrls = [] } = {}) {
-    const requestedPosts = new Set(postUrls);
-    if (postUrls.some((url) => !postUrl.test(url)))
-      throw Error("ใช้ลิงก์โพสต์จากเพจสำนักงานบังคับคดีเชียงใหม่ (ledcm2)");
-    if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
-    if (!property.auctionDates?.length)
-      throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
-    const today = bangkokDay();
-    busy = true;
-    let browser, staging;
-    const runId = randomUUID();
-    try {
-      await indexTask;
-      const index = postIndex ? await postIndex.read() : { posts: [] };
-      staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
       browser = await launchBrowser();
       const context = await browser.newContext(feedOptions);
       const page = await context.newPage();
-      page.setDefaultTimeout(15000);
-      const found = new Map();
-      const warnings = [];
-      let loginRequired = false;
       try {
-        if (!requestedPosts.size) {
-          await page.goto(PAGE, {
-            waitUntil: "domcontentloaded",
-            timeout: 60000,
-          });
-          await dismiss(page);
-          await page
-            .locator('a[href*="/ledcm2/posts/"]')
-            .first()
-            .waitFor({ timeout: 25000 });
-          if (await collectPublicPosts(page, found, maxScrolls))
-            warnings.push(
-              "Facebook จำกัดการเลื่อนฟีดสาธารณะ ระบบจะตรวจลิงก์โพสต์อื่นที่เปิดได้เพิ่มเติม",
-            );
-        }
+        await page.goto(PAGE, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+        await dismiss(page);
+        await page
+          .locator('a[href*="/ledcm2/posts/"]')
+          .first()
+          .waitFor({ timeout: 12000 });
+        if (await collectPublicPosts(page, found, maxScrolls))
+          warnings.push(
+            "Facebook จำกัดการเลื่อนฟีดสาธารณะ คลังมีเฉพาะอัลบั้มที่เปิดได้",
+          );
       } catch {
         warnings.push(
-          "Facebook ไม่แสดงโพสต์ในฟีด จะลองเปิดโพสต์ที่บันทึกไว้โดยตรง",
+          "อ่านฟีด Facebook สาธารณะไม่ได้ จะลองเปิดอัลบั้มจากลิงก์ที่เคยพบ",
         );
       }
-      const previousPosts = new Map(
-        [
-          ...(property.facebook?.albumCoverage || []),
-          ...(property.facebook?.posts || []),
-        ].map((post) => [post.url, post]),
+
+      const today = bangkokDay();
+      const recentPast = dates
+        .map(auctionISO)
+        .filter(
+          (date) =>
+            date &&
+            date < today &&
+            Date.parse(today) - Date.parse(date) <= 45 * 86400000,
+        );
+      const covered = new Set(
+        selectFacebookPosts([...albums.values()], dates, today).map(
+          (post) => post.match.date,
+        ),
       );
-      if (!requestedPosts.size) {
-        const archive = new Map(index.posts.map((p) => [p.url, p]));
-        rememberPosts(archive, previousPosts.values());
-        rememberPosts(archive, found.values());
-        const checked = new Set();
-        for (let attempt = 0; attempt < 4; attempt++) {
-          const foundDates = new Set(
-            selectFacebookPosts(
-              [...found.values()],
-              property.auctionDates,
-              today,
-            ).map((p) => p.match.date),
-          );
-          const pastDates = property.auctionDates
-            .map(auctionISO)
-            .filter((date) => date && date < today && !foundDates.has(date));
-          if (!pastDates.length) break;
-          const link = nextFacebookArchiveLink(
-            archive.values(),
-            pastDates,
-            checked,
-          );
-          if (!link) break;
-          checked.add(link);
-          try {
-            await page.goto(link, {
-              waitUntil: "domcontentloaded",
-              timeout: 12000,
-            });
-            await dismiss(page);
-            await collectPublicPosts(page, found, 6, 2);
-            rememberPosts(archive, found.values());
-          } catch {
-            /* Other public post pages may still be reachable. */
-          }
-        }
-      }
-      const knownUrls = requestedPosts.size
-        ? requestedPosts
-        : new Set([
-            ...previousPosts.keys(),
-            ...index.posts
-              .filter((p) =>
-                facebookPublicationRelevant(
-                  p.publishedOn,
-                  property.auctionDates,
-                  today,
-                ),
-              )
-              .map((p) => p.url),
-            ...[...found.values()]
-              .filter((p) =>
-                facebookPublicationRelevant(
-                  p.publishedOn,
-                  property.auctionDates,
-                  today,
-                ),
-              )
-              .map((p) => p.url),
-          ]);
-      for (const url of knownUrls) {
-        if (!postUrl.test(url)) continue;
-        const fromFeed = found.get(url);
-        if (fromFeed && matchPost(fromFeed, property.auctionDates, today))
-          continue;
+      const missingDates = recentPast.filter((date) => !covered.has(date));
+      const visited = new Set();
+      for (
+        let attempt = 0;
+        attempt < 4 && missingDates.length && !stopping;
+        attempt++
+      ) {
+        const link = nextFacebookArchiveLink(
+          [...references.values(), ...found.values()],
+          missingDates,
+          visited,
+        );
+        if (!link) break;
+        visited.add(link);
         try {
-          await page.goto(url, {
+          await page.goto(link, {
             waitUntil: "domcontentloaded",
-            timeout: 30000,
+            timeout: 12000,
           });
-          await page
-            .locator('a[href*="/photo"]')
-            .first()
-            .waitFor({ timeout: 10000 });
-          const post = await readFacebookPermalink(page, url);
-          if (post) {
-            if (post.url !== url) found.delete(post.url);
-            found.set(url, { ...post, url });
-          } else if (!fromFeed?.text || requestedPosts.has(url))
-            warnings.push(
-              "เปิดข้อความหรืออัลบั้มของบางโพสต์จากลิงก์โดยตรงไม่ได้",
-            );
+          await dismiss(page);
+          await collectPublicPosts(page, found, 5, 2);
         } catch {
-          warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
+          // Continue with the other public links already collected.
         }
       }
-      for (const url of requestedPosts) {
-        const post = found.get(url);
-        if (post && !matchPost(post, property.auctionDates, today))
-          warnings.push(
-            "โพสต์ที่ระบุไม่เข้าเงื่อนไขวันประมูล ประเภทโพสต์ หรือวันเผยแพร่ภายใน 3 วัน",
-          );
+
+      // Read each eligible public album once, including incomplete albums from earlier runs.
+      const candidates = new Map();
+      for (const post of [
+        ...references.values(),
+        ...legacy,
+        ...found.values(),
+      ]) {
+        if (!postUrl.test(post.url) || !isFacebookAuctionCaption(post.text))
+          continue;
+        const previous = candidates.get(post.url);
+        if (!previous || post.photoUrls?.length || !previous.photoUrls?.length)
+          candidates.set(post.url, post);
       }
-      for (const [url, prior] of previousPosts) {
-        if (
-          postUrl.test(url) &&
-          !found.get(url)?.text &&
-          (!requestedPosts.size || requestedPosts.has(url))
-        )
-          found.set(url, {
-            url,
-            text: prior.text,
-            publishedOn: prior.publishedOn,
-            photoUrls: [],
-            expectedPhotos: 0,
-          });
+      const imageOwners = new Map();
+      for (const post of legacy) {
+        const key = albumIdentity(post);
+        imageOwners.set(key, [
+          ...(imageOwners.get(key) || []),
+          ...(post.images || []),
+        ]);
       }
-      if (!requestedPosts.size) {
-        for (const saved of index.posts) {
-          const current = found.get(saved.url);
-          if (
-            postUrl.test(saved.url) &&
-            !current?.text &&
-            matchPost(saved, property.auctionDates, today)
-          )
-            found.set(saved.url, { ...saved, photoUrls: [] });
-        }
-      }
-      const candidates = selectFacebookPosts(
-        [...found.values()],
-        property.auctionDates,
-        today,
-      );
-      await savePostIndex(index, found.values());
-      const posts = [];
-      for (const candidate of candidates) {
-        const previousPost = previousPosts.get(candidate.url);
-        const expectedPhotos =
-          Math.max(
-            candidate.expectedPhotos,
-            previousPost?.expectedPhotos || 0,
-          ) || null;
-        const images = [];
-        const seen = new Set();
-        const downloadedSources = new Set();
-        const photoSources = new Map();
-        let previousSrc = "";
-        const startLink = candidate.photoUrls[0];
-        const album = startLink && new URL(startLink).searchParams.get("set");
-        const capture = async (photoId) => {
-          await page.waitForFunction(
-            (previous) =>
-              [...document.images].some(
-                (i) =>
-                  i.getBoundingClientRect().width > 350 &&
-                  i.naturalWidth > 500 &&
-                  i.complete &&
-                  i.currentSrc !== previous,
-              ),
-            previousSrc,
-            { timeout: 20000 },
-          );
-          const src = await page
-            .locator("img")
-            .evaluateAll(
-              (imgs, previous) =>
-                imgs
-                  .filter(
-                    (i) =>
-                      i.getBoundingClientRect().width > 350 &&
-                      i.naturalWidth > 500 &&
-                      i.complete &&
-                      i.currentSrc !== previous,
-                  )
-                  .sort(
-                    (a, b) =>
-                      b.getBoundingClientRect().width *
-                        b.getBoundingClientRect().height -
-                      a.getBoundingClientRect().width *
-                        a.getBoundingClientRect().height,
-                  )[0]?.currentSrc,
-              previousSrc,
-            );
-          if (!src) throw Error("ไม่พบภาพต้นฉบับ");
-          previousSrc = src;
-          if (downloadedSources.has(src))
-            throw Error("ภาพเดิมยังแสดงอยู่ในตัวดูรูป");
-          const url = new URL(src);
-          if (
-            url.protocol !== "https:" ||
-            !(
-              url.hostname.endsWith(".fbcdn.net") ||
-              url.hostname.endsWith(".facebook.com")
-            )
-          )
-            throw Error("ภาพมาจากโดเมนที่ไม่รองรับ");
-          const response = await context.request.get(src, {
-            timeout: 30000,
-            maxRedirects: 0,
-          });
-          if (!response.ok())
-            throw Error("โหลดรูป Facebook ไม่สำเร็จ HTTP " + response.status());
-          const type = response.headers()["content-type"]?.split(";")[0],
-            extension = {
-              "image/jpeg": "jpg",
-              "image/png": "png",
-              "image/webp": "webp",
-            }[type];
-          if (!extension) throw Error("รูปแบบรูปภาพไม่รองรับ");
-          const filename = `fb-${photoId}-${runId}.${extension}`;
-          await writeFile(path.join(staging, filename), await response.body());
-          images.push({
-            url: "/evidence/" + filename,
-            sourceUrl: page.url(),
-            photoId,
-          });
-          downloadedSources.add(src);
-          photoSources.set(photoId, src);
-        };
-        const links = new Set(
-          [startLink, candidate.albumStart, ...candidate.photoUrls].filter(
-            Boolean,
-          ),
+
+      const attempted = new Set();
+      for (const [url, preview] of candidates) {
+        if (stopping) break;
+        let key = albumIdentity(preview);
+        let known =
+          albums.get(key) || albums.get(references.get(url)?.albumKey);
+        let priorImages = await existingFacebookImages(
+          known?.images || [],
+          evidencePath,
         );
-        const visits = [...links].map((link) => {
-          const traverse = link === startLink || link === candidate.albumStart;
-          return { link, traverse, direction: "next" };
-        });
-        if (startLink && expectedPhotos > links.size)
-          visits.push({
-            link: startLink,
-            traverse: true,
-            direction: "previous",
-          });
-        for (const { link, traverse, direction } of visits) {
-          if (seen.size >= expectedPhotos) break;
-          const seed = new URL(link);
-          if (seen.has(seed.searchParams.get("fbid")) && !traverse) continue;
+        if (known && completeAlbum({ ...known, images: priorImages })) continue;
+        let post = preview;
+        if (
+          !post.photoUrls?.length ||
+          !post.publishedOn ||
+          truncatedCaption.test(post.text)
+        ) {
           try {
-            await page.goto(link, {
+            await page.goto(url, {
               waitUntil: "domcontentloaded",
-              timeout: 30000,
+              timeout: 18000,
             });
-            const visited = new Set();
-            previousSrc = "";
-            while (
-              seen.size < expectedPhotos &&
-              visited.size < expectedPhotos
-            ) {
-              const current = new URL(page.url());
-              const photoId = current.searchParams.get("fbid");
-              if (
-                !/^\d+$/.test(photoId || "") ||
-                visited.has(photoId) ||
-                current.searchParams.get("set") !== album
-              )
-                break;
-              visited.add(photoId);
-              if (!seen.has(photoId)) {
-                try {
-                  await capture(photoId);
-                  seen.add(photoId);
-                } catch {
-                  // An unavailable image must not prevent checking the next one.
-                }
-              } else {
-                previousSrc = photoSources.get(photoId) || "";
-              }
-              if (!traverse || seen.size >= expectedPhotos) break;
-              const step = await navigateFacebookPhoto(
-                page,
-                current,
-                direction,
-              );
-              loginRequired ||= step.loginRequired;
-              if (!step.advanced) break;
-            }
-          } catch (e) {
-            warnings.push(
-              `อ่านรูปบางส่วนไม่สำเร็จ: ${e.message.split("\n")[0]}`,
-            );
+            await page
+              .locator('a[href*="/photo"]')
+              .first()
+              .waitFor({ timeout: 4500 });
+            post = (await readFacebookPermalink(page, url)) || preview;
+          } catch {
+            warnings.push("เปิดโพสต์บางรายการเพื่อซิงค์รูปไม่ได้");
           }
         }
-        for (const prior of previousPost?.images || []) {
-          if (
-            seen.has(prior.photoId) ||
-            !/^\/evidence\/fb-[a-z0-9-]+\.(jpg|png|webp)$/.test(prior.url)
-          )
-            continue;
-          const filename = path.basename(prior.url);
-          try {
-            await copyFile(
-              path.join(evidencePath, filename),
-              path.join(staging, filename),
-            );
-            images.push(prior);
-            seen.add(prior.photoId);
-          } catch (error) {
-            if (error.code !== "ENOENT") throw error;
-          }
+        if (
+          !post.publishedOn ||
+          truncatedCaption.test(post.text) ||
+          !isFacebookAuctionCaption(post.text)
+        )
+          continue;
+        key = albumIdentity(post);
+        known = albums.get(key) || known;
+        references.set(url, {
+          url,
+          text: post.text,
+          publishedOn: post.publishedOn,
+          expectedPhotos: post.expectedPhotos,
+          albumKey: key,
+        });
+        if (attempted.has(key)) continue;
+        attempted.add(key);
+        priorImages = await existingFacebookImages(
+          [
+            ...(known?.images || []),
+            ...(imageOwners.get(key) || []),
+            ...(imageOwners.get(url) || []),
+          ],
+          evidencePath,
+        );
+        const expectedPhotos =
+          Math.max(post.expectedPhotos || 0, known?.expectedPhotos || 0) ||
+          null;
+        if (completeAlbum({ expectedPhotos, images: priorImages })) {
+          albums.set(key, {
+            albumKey: key,
+            url: known?.url || url,
+            text: post.text,
+            publishedOn: post.publishedOn,
+            expectedPhotos,
+            downloadedPhotos: priorImages.length,
+            images: priorImages,
+          });
+          await save();
+          continue;
         }
-        if (expectedPhotos == null || images.length < expectedPhotos)
-          warnings.push(
-            expectedPhotos == null
-              ? "Facebook ไม่แสดงจำนวนรูปในโพสต์ จึงยังยืนยันไม่ได้ว่าดึงครบ"
-              : `เก็บได้ ${images.length} จาก ${expectedPhotos} รูปที่ Facebook ระบุ`,
-          );
-        posts.push({
-          url: candidate.url,
-          text: candidate.text,
-          publishedOn: candidate.publishedOn,
-          match: candidate.match,
-          images,
-          rowMatched: images.some((image) => image.caseBoxes?.length),
+        const { images, loginRequired } = await downloadAlbum({
+          page,
+          context,
+          candidate: post,
+          priorImages,
+          expectedPhotos,
+          evidencePath,
+          warnings,
+          navigate: navigateFacebookPhoto,
+        });
+        const album = {
+          albumKey: key,
+          url: known?.url || url,
+          text: post.text,
+          publishedOn: post.publishedOn,
           expectedPhotos,
           downloadedPhotos: images.length,
+          images,
+        };
+        albums.set(key, album);
+        if (loginRequired && !completeAlbum(album))
+          warnings.push(
+            "ตัวดูรูปสาธารณะของ Facebook ยังเปิดรูปบางส่วนไม่ได้ ระบบจะลองใหม่ในรอบถัดไป",
+          );
+        await save();
+      }
+
+      for (const post of found.values()) {
+        if (
+          !postUrl.test(post.url) ||
+          !post.publishedOn ||
+          references.has(post.url)
+        )
+          continue;
+        references.set(post.url, {
+          url: post.url,
+          publishedOn: post.publishedOn,
+          text: post.text,
+          expectedPhotos: post.expectedPhotos,
+          albumKey: albumIdentity(post),
         });
       }
-      const filtered = await filterFacebookImages(
-        posts,
-        property.caseNumber,
-        staging,
-      );
-      if (loginRequired && filtered.caseFilter?.status === "incomplete")
-        warnings.push(
-          "ตัวดูรูปสาธารณะของ Facebook ยังเปิดรูปถัดไปไม่ได้หลังรีเฟรช",
-        );
-      const retained = new Set(
-        filtered.posts.flatMap((post) => post.images.map((image) => image.url)),
-      );
-      for (const url of retained) {
-        const filename = path.basename(url);
-        await copyFile(
-          path.join(staging, filename),
-          path.join(evidencePath, filename),
-        );
-      }
-      return {
-        checkedAt: new Date().toISOString(),
-        ...filtered,
-        albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
-        warnings: [...new Set(warnings)],
-        scannedPosts: found.size,
-        note: "ตรวจวันประมูลและวันเผยแพร่ของโพสต์สาธารณะ",
-      };
-    } catch (e) {
-      throw Error(
-        "Facebook: " +
-          e.message.split("\n")[0] +
-          " — หากเว็บจำกัดการเข้าถึง ให้เปิดหน้าเพจตรวจด้วยตนเอง",
-      );
+      if (!stopping) await save(new Date().toISOString());
     } finally {
-      try {
-        await browser?.close();
-      } finally {
-        busy = false;
-        if (staging) await rm(staging, { recursive: true, force: true });
-      }
+      await browser?.close();
+      browser = undefined;
     }
   }
-  return { search, scheduleIndex, stopIndex };
+
+  async function status() {
+    const index = await postIndex.read();
+    const albums = index.albums || [];
+    const complete = albums.filter(completeAlbum).length;
+    return {
+      running: Boolean(task),
+      checkedAt: index.checkedAt,
+      total: albums.length,
+      complete,
+      partial: albums.length - complete,
+      photos: new Set(
+        albums.flatMap((album) => album.images.map((image) => image.photoId)),
+      ).size,
+      warnings: index.warnings || [],
+    };
+  }
+
+  async function refresh(force = true) {
+    if (!task && !stopping)
+      task = syncLibrary(force).finally(() => {
+        task = undefined;
+      });
+    await task;
+    return status();
+  }
+
+  async function forProperty(property) {
+    const index = await postIndex.read();
+    const posts = selectFacebookPosts(
+      index.albums || [],
+      property.auctionDates || [],
+    );
+    return {
+      checkedAt: index.checkedAt,
+      posts,
+    };
+  }
+
+  function scheduleIndex() {
+    if (timer || stopping) return;
+    const tick = () =>
+      void refresh(false).catch((error) =>
+        console.warn("Facebook albums:", error.message.split("\n")[0]),
+      );
+    timer = setInterval(tick, 15 * 60000);
+    timer.unref();
+    tick();
+  }
+
+  async function stopIndex() {
+    stopping = true;
+    clearInterval(timer);
+    await browser?.close().catch(() => {});
+    await task?.catch(() => {});
+  }
+
+  return { status, refresh, forProperty, scheduleIndex, stopIndex };
 }

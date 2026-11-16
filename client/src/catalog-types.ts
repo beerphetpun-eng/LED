@@ -5,7 +5,7 @@ export type UserNotes = {
   auctionStatus: string;
   protected: boolean;
 };
-export type DetailAction = "photos" | "deeds" | "facebook";
+export type DetailAction = "photos" | "deeds";
 export type Parcel = {
   deed: string;
   latitude: number | null;
@@ -24,17 +24,7 @@ export type CaseBox = {
   height: number;
 };
 export type FacebookResult = {
-  checkedAt: string;
-  note: string;
-  scannedPosts: number;
-  warnings: string[];
-  caseFilter?: {
-    status: "matched" | "no_match" | "unreadable" | "incomplete";
-    checked: number;
-    kept: number;
-    total: number;
-    incompletePosts?: number;
-  };
+  checkedAt?: string;
   posts: {
     url: string;
     text: string;
@@ -44,12 +34,19 @@ export type FacebookResult = {
       url: string;
       sourceUrl: string;
       photoId: string;
-      caseBoxes?: CaseBox[];
     }[];
-    rowMatched: boolean;
     expectedPhotos?: number | null;
     downloadedPhotos?: number;
   }[];
+};
+export type FacebookLibraryStatus = {
+  running: boolean;
+  checkedAt?: string;
+  total: number;
+  complete: number;
+  partial: number;
+  photos: number;
+  warnings: string[];
 };
 export type Property = {
   id: string;
@@ -135,6 +132,7 @@ export type SyncResponse = {
   settings: Settings;
   runtime: Runtime;
   alerts: SyncAlert[];
+  facebookLibrary: FacebookLibraryStatus;
   lastCleanup?: { at: string; deleted: number };
 };
 export type SyncAlert = {

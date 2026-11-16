@@ -19,15 +19,6 @@ export async function api<T>(
   if (!r.ok) throw Error(data.error || "เชื่อมต่อไม่สำเร็จ");
   return data;
 }
-export async function requireFacebookAlbumBackend() {
-  const health = await api<{
-    capabilities?: { facebookPublicIndex?: boolean };
-  }>("/health");
-  if (!health.capabilities?.facebookPublicIndex)
-    throw Error(
-      "Land Radar ยังใช้เซิร์ฟเวอร์รุ่นเก่า กรุณาหยุดโปรแกรมแล้วเปิด Start.cmd ใหม่ก่อนดึงรูป Facebook",
-    );
-}
 export const money = (v: number | null) =>
   v === null
     ? "ไม่ระบุ"

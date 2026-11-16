@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
@@ -32,22 +32,13 @@ test("archive discovery follows the nearest unvisited public post around the auc
   );
 });
 
-test("automatic search reuses a verified indexed result after it leaves the feed", async () => {
-  const savedUrl = "https://web.facebook.com/ledcm2/posts/historical";
+test("shared sync fills an album once and two properties read the same files without opening Facebook", async () => {
   const directory = await mkdtemp(
-    path.join(tmpdir(), "led-facebook-index-test-"),
+    path.join(tmpdir(), "led-shared-album-test-"),
   );
-  let index = {
-    posts: [
-      {
-        url: savedUrl,
-        publishedOn: "2020-10-29",
-        expectedPhotos: 20,
-        text: "ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 29 ตุลาคม 2563",
-      },
-    ],
-  };
-  const opened = [];
+  let index = { posts: [] };
+  let visits = 0;
+  let downloads = 0;
   const source = createFacebookSource(directory, {
     maxScrolls: 0,
     postIndex: {
@@ -56,22 +47,29 @@ test("automatic search reuses a verified indexed result after it leaves the feed
         index = data;
       },
     },
+    async downloadAlbum({ priorImages }) {
+      downloads++;
+      assert.equal(priorImages.length, downloads - 1);
+      const photoId = String(downloads);
+      const filename = `fb-${photoId}-shared.jpg`;
+      await writeFile(path.join(directory, filename), "fixture");
+      return {
+        images: [...priorImages, { photoId, url: "/evidence/" + filename }],
+      };
+    },
     async launchBrowser() {
-      const browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch();
       return {
         close: () => browser.close(),
         async newContext(options) {
           const context = await browser.newContext(options);
           await context.route("https://web.facebook.com/**", async (route) => {
-            const url = route.request().url();
-            opened.push(url);
-            const body =
-              url === savedUrl
-                ? '<a href="https://web.facebook.com/photo/?fbid=11">รูปที่เปิดไม่ได้</a>'
-                : '<div>Monday 16 November 2020 at 09:00 <a href="https://web.facebook.com/ledcm2/posts/current">recent post</a></div>';
+            visits++;
+            const card = (slug) =>
+              `<article><div>Thursday 29 October 2020 at 16:40 <a href="https://web.facebook.com/ledcm2/posts/${slug}">post</a></div><p data-ad-preview="message">ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 29 ตุลาคม 2563</p><a href="https://web.facebook.com/photo/?fbid=1&amp;set=pcb.900">+1</a></article>`;
             await route.fulfill({
               contentType: "text/html; charset=utf-8",
-              body,
+              body: card("first") + card("alias"),
             });
           });
           return context;
@@ -80,18 +78,30 @@ test("automatic search reuses a verified indexed result after it leaves the feed
     },
   });
   try {
-    const result = await source.search({
+    const first = await source.refresh();
+    assert.equal(first.total, 1);
+    assert.equal(first.partial, 1);
+    assert.equal(first.photos, 1);
+    const complete = await source.refresh();
+    assert.equal(complete.complete, 1);
+    assert.equal(complete.photos, 2);
+    await source.refresh();
+    assert.equal(downloads, 2);
+    const before = visits;
+    const propertyA = await source.forProperty({
       auctionDates: ["29/10/2563"],
-      caseNumber: "ทดสอบ",
+      caseNumber: "A",
     });
-    assert.ok(opened.includes(savedUrl));
-    assert.equal(result.posts[0].url, savedUrl);
-    assert.equal(result.posts[0].match.kind, "result");
-    assert.equal(result.caseFilter.status, "incomplete");
-    assert.equal(
-      index.posts.find((post) => post.url === savedUrl).expectedPhotos,
-      20,
-    );
+    const propertyB = await source.forProperty({
+      auctionDates: ["29/10/2563"],
+      caseNumber: "B",
+    });
+    const other = await source.forProperty({ auctionDates: ["30/10/2563"] });
+    assert.equal(propertyA.posts[0].match.kind, "result");
+    assert.deepEqual(propertyA.posts[0].images, propertyB.posts[0].images);
+    assert.equal(propertyA.posts[0].images.length, 2);
+    assert.deepEqual(other.posts, []);
+    assert.equal(visits, before);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

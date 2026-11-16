@@ -373,7 +373,8 @@ export async function pendingFiles() {
 export async function fileReferenced(url) {
   return !!(
     await pool.query(
-      "SELECT 1 FROM land_radar.properties WHERE position($1 in source::text)>0 LIMIT 1",
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM land_radar.properties WHERE position($1 in source::text)>0)
+        OR EXISTS (SELECT 1 FROM land_radar.state WHERE key='facebook_public_posts' AND position($1 in data::text)>0)`,
       [url],
     )
   ).rowCount;

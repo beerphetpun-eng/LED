@@ -5,6 +5,7 @@ import L from "leaflet";
 import {
   Compass,
   RefreshCw,
+  LoaderCircle,
   SlidersHorizontal,
   MapPin,
   Bookmark,
@@ -29,13 +30,7 @@ import type {
   CaseBox,
   DetailAction,
 } from "./catalog-types";
-import {
-  api,
-  mapParcels,
-  money,
-  requireFacebookAlbumBackend,
-  time,
-} from "./catalog-api";
+import { api, mapParcels, money, time } from "./catalog-api";
 import { approximateLocation, mapLocationLabel } from "./approximate-location";
 import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
@@ -105,6 +100,7 @@ function App() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
     [detailAction, setDetailAction] = useState<DetailAction | null>(null),
+    [facebookRefreshing, setFacebookRefreshing] = useState(false),
     [full, setFull] = useState(false),
     [filtersCollapsed, setFiltersCollapsed] = useState(true),
     [view, setView] = useState<"map" | "list">("map"),
@@ -170,6 +166,16 @@ function App() {
     const s = await api<SyncResponse>("/sync");
     setSync(s);
     return s;
+  }
+  async function refreshFacebookLibrary() {
+    if (facebookRefreshing || sync?.facebookLibrary?.running) return;
+    setFacebookRefreshing(true);
+    try {
+      await api("/facebook/library/refresh", "POST");
+      await loadSync();
+    } finally {
+      setFacebookRefreshing(false);
+    }
   }
   useEffect(() => {
     act("กำลังเชื่อมต่อ", async () => {
@@ -269,27 +275,6 @@ function App() {
         : current,
     );
     void loadLibrary().catch((e) => setError(e.message));
-  }
-  async function facebook(postUrl: string) {
-    if (!selected) return;
-    const id = selected.id;
-    return runDetailAction("facebook", async () => {
-      try {
-        await report("กำลังอ่าน Facebook", async () => {
-          await requireFacebookAlbumBackend();
-          const p = await api<Property>(
-            "/properties/" + id + "/facebook",
-            "POST",
-            { postUrl },
-          );
-          setSelected((current) =>
-            current?.id === id ? { ...current, facebook: p.facebook } : current,
-          );
-        });
-      } finally {
-        void loadSync().catch(() => {});
-      }
-    });
   }
   async function runDetailAction<T>(
     action: DetailAction,
@@ -518,6 +503,52 @@ function App() {
               )}
             </div>
           </section>
+          {sync?.facebookLibrary && (
+            <section
+              className="sync-panel"
+              aria-labelledby="facebook-library-title"
+            >
+              <div className="section-head">
+                <div>
+                  <h2 id="facebook-library-title">คลังรูป Facebook</h2>
+                  <p>
+                    ตรวจทุก 6 ชั่วโมงขณะเปิดแอป
+                    ทรัพย์ที่มีวันประมูลตรงกันใช้รูปจากคลังเดียวกัน
+                  </p>
+                </div>
+                <button
+                  className="primary"
+                  disabled={facebookRefreshing || sync.facebookLibrary.running}
+                  aria-busy={facebookRefreshing || sync.facebookLibrary.running}
+                  onClick={() =>
+                    act("กำลังซิงค์คลัง Facebook", refreshFacebookLibrary)
+                  }
+                >
+                  {facebookRefreshing || sync.facebookLibrary.running ? (
+                    <LoaderCircle size={16} className="action-spinner" />
+                  ) : (
+                    <RefreshCw size={16} />
+                  )}
+                  {facebookRefreshing || sync.facebookLibrary.running
+                    ? "กำลังซิงค์คลัง…"
+                    : "ซิงค์คลัง Facebook ตอนนี้"}
+                </button>
+              </div>
+              <p className="small">
+                ครบ {sync.facebookLibrary.complete} อัลบั้ม · ยังไม่ครบ{" "}
+                {sync.facebookLibrary.partial} อัลบั้ม · เก็บแล้ว{" "}
+                {sync.facebookLibrary.photos} รูป
+              </p>
+              <p className="small muted">
+                ตรวจล่าสุด {time(sync.facebookLibrary.checkedAt)}
+              </p>
+              {sync.facebookLibrary.warnings.map((warning) => (
+                <p className="small inline-error" key={warning}>
+                  {warning}
+                </p>
+              ))}
+            </section>
+          )}
           {sync && geography.length > 0 ? (
             <SyncPanel
               provinces={geography}
@@ -920,7 +951,6 @@ function App() {
           property={selected}
           onClose={closeDetails}
           onSave={(patch) => saveUser(selected.id, patch)}
-          onFacebook={facebook}
           detailAction={detailAction}
           onRefreshDeeds={() => refreshDeeds(selected.id)}
           onRefreshPhotos={() => refreshPhotos(selected.id)}

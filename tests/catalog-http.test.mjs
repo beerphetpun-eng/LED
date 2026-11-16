@@ -44,19 +44,21 @@ test("database outages preserve server identity and malformed JSON stays out of 
   assert.deepEqual(messages, []);
 });
 
-test("passes an explicitly selected public post without allowing a date range or sign-in", async (t) => {
+test("property views use shared Facebook albums and only the library endpoint can sync", async (t) => {
   const property = { id: "a".repeat(32) };
-  const post = "https://web.facebook.com/ledcm2/posts/example";
-  let search;
+  let sharedReads = 0,
+    refreshes = 0;
   const app = createCatalogHttp({
-    repository: {
-      getProperty: async () => property,
-      updateSource: async () => {},
-    },
+    repository: { getProperty: async () => property },
     facebook: {
-      search: async (...args) => {
-        search = args;
-        return { posts: [post], warnings: [] };
+      forProperty: async (p) => {
+        assert.equal(p.id, property.id);
+        sharedReads++;
+        return { posts: [{ images: [{ url: "/evidence/fb-1-shared.jpg" }] }] };
+      },
+      refresh: async () => {
+        refreshes++;
+        return { photos: 1 };
       },
     },
     root: process.cwd(),
@@ -65,22 +67,24 @@ test("passes an explicitly selected public post without allowing a date range or
   const server = app.listen(0, "127.0.0.1");
   t.after(() => server.close());
   await once(server, "listening");
-  const response = await fetch(
-    `http://127.0.0.1:${server.address().port}/api/properties/${property.id}/facebook`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
-      body: JSON.stringify({ postUrl: post + "?ref=feed", nearbyDays: 7 }),
-    },
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const detail = await fetch(`${base}/properties/${property.id}`);
+  assert.equal(
+    (await detail.json()).facebook.posts[0].images[0].url,
+    "/evidence/fb-1-shared.jpg",
   );
-  assert.equal(response.status, 200);
-  assert.deepEqual(search, [property, { postUrls: [post] }]);
-  const signIn = await fetch(
-    `http://127.0.0.1:${server.address().port}/api/facebook/sign-in`,
-    {
-      method: "POST",
-      headers: { "X-Land-Radar": "1" },
-    },
-  );
-  assert.equal(signIn.status, 404);
+  const headers = { "X-Land-Radar": "1" };
+  const legacy = await fetch(`${base}/properties/${property.id}/facebook`, {
+    method: "POST",
+    headers,
+  });
+  assert.equal(legacy.status, 200);
+  assert.equal(sharedReads, 2);
+  assert.equal(refreshes, 0);
+  const refreshed = await fetch(`${base}/facebook/library/refresh`, {
+    method: "POST",
+    headers,
+  });
+  assert.deepEqual(await refreshed.json(), { photos: 1 });
+  assert.equal(refreshes, 1);
 });
