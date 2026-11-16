@@ -592,8 +592,18 @@ export function PropertyDetails({
               {p.facebook?.posts && (
                 <>
                   <p className="small muted">
-                    ตรวจเมื่อ {time(p.facebook.checkedAt)}
+                    ตรวจเมื่อ {time(p.facebook.checkedAt)} · อ่านได้{" "}
+                    {p.facebook.scannedPosts} โพสต์
                   </p>
+                  {!!p.facebook.warnings?.length && (
+                    <ul className="small inline-error">
+                      {Array.from(new Set(p.facebook.warnings)).map(
+                        (warning) => (
+                          <li key={warning}>{warning}</li>
+                        ),
+                      )}
+                    </ul>
+                  )}
                   {caseFilter && (
                     <p className="small">
                       {caseFilter.status === "matched"
@@ -612,7 +622,11 @@ export function PropertyDetails({
                     </p>
                   )}
                   {!facebookPosts.length && (
-                    <p>ยังไม่มีโพสต์ที่เข้าเงื่อนไขวันประมูลและวันเผยแพร่</p>
+                    <p>
+                      {p.facebook.scannedPosts
+                        ? "ไม่พบโพสต์ที่เข้าเงื่อนไขวันประมูลและวันเผยแพร่ในโพสต์ที่ตรวจได้"
+                        : "อ่านโพสต์สาธารณะจาก Facebook ไม่ได้ในรอบนี้"}
+                    </p>
                   )}
                   {facebookPosts.map((post) => (
                     <article className="facebook-post" key={post.url}>

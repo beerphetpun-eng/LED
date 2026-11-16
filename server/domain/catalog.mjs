@@ -286,6 +286,24 @@ export function facebookPublishedDay(label) {
     : null;
 }
 
+function facebookPublicationMatches(publishedOn, date, today, kind) {
+  if (!date || !publishedOn || publishedOn > today) return false;
+  const offset = (Date.parse(publishedOn) - Date.parse(date)) / 86400000;
+  return kind === "result"
+    ? date <= today && offset >= 0 && offset <= 3
+    : date >= today && offset >= -3 && offset <= 0;
+}
+
+export function facebookPublicationRelevant(publishedOn, auctionDates, today) {
+  return auctionDates.some((auction) => {
+    const date = auctionISO(auction);
+    return (
+      facebookPublicationMatches(publishedOn, date, today, "result") ||
+      facebookPublicationMatches(publishedOn, date, today, "announcement")
+    );
+  });
+}
+
 export function matchPost(
   { text, publishedOn },
   auctionDates,
@@ -295,7 +313,7 @@ export function matchPost(
     .replace(/[\u200b-\u200f]/g, "")
     .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50));
   const title = auctionPostTitle.exec(content);
-  if (!title || !publishedOn || publishedOn > today) return null;
+  if (!title) return null;
 
   const caption = content
     .slice(title.index + title[0].length)
@@ -310,12 +328,9 @@ export function matchPost(
     return null;
 
   const kind = title[1].startsWith("ผล") ? "result" : "announcement";
-  const offset = (Date.parse(publishedOn) - Date.parse(date)) / 86400000;
-  const eligible =
-    kind === "result"
-      ? date <= today && offset >= 0 && offset <= 3
-      : date >= today && offset >= -3 && offset <= 0;
-  return eligible ? { date, auction: date, kind } : null;
+  return facebookPublicationMatches(publishedOn, date, today, kind)
+    ? { date, auction: date, kind }
+    : null;
 }
 
 export function selectFacebookPosts(posts, auctionDates, today = bangkokDay()) {

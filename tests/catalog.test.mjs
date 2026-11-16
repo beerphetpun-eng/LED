@@ -14,6 +14,7 @@ import {
   matchPost,
   selectFacebookPosts,
   facebookForDisplay,
+  facebookPublicationRelevant,
   defaultSettings,
 } from "../server/domain/catalog.mjs";
 test("defaults are weekly Chiang Mai city and only explicit deletion protection", () => {
@@ -268,6 +269,15 @@ test("Facebook requires the auction date in the caption even when other dates ma
     ),
     null,
   );
+});
+
+test("does not reopen Facebook feed links outside the eligible publication dates", () => {
+  const dates = ["29/10/2569", "19/11/2569"];
+  const today = "2026-11-16";
+  assert.equal(facebookPublicationRelevant("2026-10-31", dates, today), true);
+  assert.equal(facebookPublicationRelevant("2026-11-16", dates, today), true);
+  assert.equal(facebookPublicationRelevant("2026-11-14", dates, today), false);
+  assert.equal(facebookPublicationRelevant("2026-11-17", dates, today), false);
 });
 
 test("prefers results on auction day only once posted, and keeps announcements for future rounds", () => {

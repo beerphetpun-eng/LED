@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   bangkokDay,
   facebookPublishedDay,
+  facebookPublicationRelevant,
   matchPost,
   selectFacebookPosts,
 } from "../domain/catalog.mjs";
@@ -64,12 +65,17 @@ export async function navigateFacebookPhoto(page, current, direction = "next") {
   return { advanced: false, loginRequired };
 }
 
-export async function readFacebookPosts(page) {
+export async function readFacebookPosts(page, includeReferences = false) {
   const posts = await page
     .locator('a[href*="/ledcm2/posts/"]')
-    .evaluateAll((links) => {
+    .evaluateAll((links, includeReferences) => {
       const result = [];
       for (const link of links) {
+        const reference = {
+          url: link.href.split("?")[0],
+          publicationLabel: link.title + " " + link.parentElement.innerText,
+        };
+        let post;
         let parent = link.parentElement;
         for (
           let depth = 0;
@@ -117,20 +123,21 @@ export async function readFacebookPosts(page) {
               ).values(),
             ];
             if (!photoUrls.length) break;
-            result.push({
-              url: link.href.split("?")[0],
+            post = {
+              ...reference,
               text,
-              publicationLabel: link.title + " " + link.parentElement.innerText,
               photoUrls,
               albumStart: more?.href,
               expectedPhotos: photoUrls.length + (more ? extraPhotos(more) : 0),
-            });
+            };
             break;
           }
         }
+        if (post || includeReferences)
+          result.push(post || { ...reference, text: "", photoUrls: [] });
       }
       return result;
-    });
+    }, includeReferences);
   return posts.map(({ publicationLabel, ...post }) => ({
     ...post,
     publishedOn: facebookPublishedDay(publicationLabel),
@@ -186,6 +193,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       const warnings = [];
       let loginRequired = false;
       let unchanged = requestedPosts.size ? 5 : 0;
+      let feedLimited = false;
       try {
         if (!requestedPosts.size) {
           await page.goto(PAGE, {
@@ -205,15 +213,18 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
         );
       }
       for (let scroll = 0; scroll < maxScrolls && unchanged < 5; scroll++) {
-        for (const button of (
-          await page
-            .getByRole("button", { name: /^(See more|ดูเพิ่มเติม)$/ })
-            .all()
-        ).slice(0, 10))
-          if (await button.isVisible()) await button.click().catch(() => {});
-        const posts = await readFacebookPosts(page);
+        const posts = await readFacebookPosts(page, true);
         const before = found.size;
-        for (const p of posts) found.set(p.url, p);
+        for (const p of posts) {
+          if (p.text || !found.get(p.url)?.text) found.set(p.url, p);
+        }
+        const gate = page
+          .getByRole("dialog")
+          .filter({
+            hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
+          })
+          .first();
+        if (await gate.isVisible()) feedLimited = true;
         unchanged = before === found.size ? unchanged + 1 : 0;
         if (unchanged >= 5) break;
         await page.mouse.move(700, 840);
@@ -221,6 +232,10 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
         await page.waitForTimeout(1200);
         await dismiss(page);
       }
+      if (feedLimited)
+        warnings.push(
+          "Facebook จำกัดการเลื่อนฟีดสาธารณะ จึงตรวจได้เฉพาะโพสต์ที่หน้าเว็บแสดง",
+        );
       const previousPosts = new Map(
         [
           ...(property.facebook?.albumCoverage || []),
@@ -229,7 +244,18 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       );
       const knownUrls = requestedPosts.size
         ? requestedPosts
-        : previousPosts.keys();
+        : new Set([
+            ...previousPosts.keys(),
+            ...[...found.values()]
+              .filter((p) =>
+                facebookPublicationRelevant(
+                  p.publishedOn,
+                  property.auctionDates,
+                  today,
+                ),
+              )
+              .map((p) => p.url),
+          ]);
       for (const url of knownUrls) {
         if (!postUrl.test(url)) continue;
         const fromFeed = found.get(url);
@@ -248,7 +274,10 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
           if (post) {
             if (post.url !== url) found.delete(post.url);
             found.set(url, { ...post, url });
-          }
+          } else if (!fromFeed?.text || requestedPosts.has(url))
+            warnings.push(
+              "เปิดข้อความหรืออัลบั้มของบางโพสต์จากลิงก์โดยตรงไม่ได้",
+            );
         } catch {
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
@@ -263,7 +292,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       for (const [url, prior] of previousPosts) {
         if (
           postUrl.test(url) &&
-          !found.has(url) &&
+          !found.get(url)?.text &&
           (!requestedPosts.size || requestedPosts.has(url))
         )
           found.set(url, {
@@ -486,7 +515,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
         checkedAt: new Date().toISOString(),
         ...filtered,
         albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
-        warnings,
+        warnings: [...new Set(warnings)],
         scannedPosts: found.size,
         note: "ตรวจวันประมูลและวันเผยแพร่ของโพสต์สาธารณะ",
       };
