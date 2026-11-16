@@ -274,6 +274,10 @@ const absolutePostTimestamp = new RegExp(
 );
 const auctionPostTitle =
   /(ผล\s*(?:การ\s*)?|(?:บัญชี|ประกาศ)\s*(?:รายการ\s*|การ\s*)?)ขาย\s*ทอดตลาด\s*ทรัพย์(?:สิน)?/;
+
+export function isFacebookAuctionCaption(text) {
+  return auctionPostTitle.test(clean(text).replace(/[\u200b-\u200f]/g, ""));
+}
 const saleDatePrefix =
   /^(?:[\s\p{P}\p{S}]+)?(?:(?:ประจำ\s*|ใน\s*)?วัน\s*(?:(?:จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์)\s*)?ที่\s*)?/u;
 

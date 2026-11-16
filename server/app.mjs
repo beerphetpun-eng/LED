@@ -30,6 +30,17 @@ const facebook = createFacebookSource(evidencePath, {
     read: () => db.getState("facebook_public_posts", { posts: [] }),
     write: (data) => db.setState("facebook_public_posts", data),
   },
+  async readCatalog() {
+    const properties = await db.allProperties();
+    return {
+      dates: [
+        ...new Set(
+          properties.flatMap((property) => property.auctionDates || []),
+        ),
+      ],
+      legacy: properties.flatMap((property) => property.facebook?.posts || []),
+    };
+  },
 });
 const app = createCatalogHttp({
   repository: db,

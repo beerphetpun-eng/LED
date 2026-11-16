@@ -46,7 +46,6 @@ export function PropertyDetails({
   property: p,
   onClose,
   onSave,
-  onFacebook,
   detailAction,
   onRefreshDeeds,
   onRefreshPhotos,
@@ -55,7 +54,6 @@ export function PropertyDetails({
   property: Property;
   onClose: () => void;
   onSave: (patch: Partial<UserNotes>) => Promise<void>;
-  onFacebook: (postUrl: string) => Promise<void>;
   detailAction: DetailAction | null;
   onRefreshDeeds: () => Promise<{ confirmed: number; requested: number }>;
   onRefreshPhotos: () => Promise<{
@@ -75,8 +73,6 @@ export function PropertyDetails({
     [commentDraft, setCommentDraft] = useState<string | null>(null),
     [savingComment, setSavingComment] = useState(false),
     [commentError, setCommentError] = useState(""),
-    [fbError, setFbError] = useState(""),
-    [fbPostUrl, setFbPostUrl] = useState(""),
     [deedMessage, setDeedMessage] = useState<{
       text: string;
       warning: boolean;
@@ -89,7 +85,6 @@ export function PropertyDetails({
   const comment = commentDraft ?? p.user.comment;
   const photoBusy = detailAction === "photos";
   const deedRefreshing = detailAction === "deeds";
-  const facebookLoading = detailAction === "facebook";
   async function savePreferences(patch: Partial<Omit<UserNotes, "comment">>) {
     if (pendingPreferences) return;
     setPendingPreferences(patch);
@@ -118,14 +113,6 @@ export function PropertyDetails({
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const auctionDays = p.auctionDates.map(auctionDay);
   const facebookPosts = p.facebook?.posts ?? [];
-  const caseFilter = p.facebook?.caseFilter;
-  const incompleteFacebookPosts =
-    caseFilter?.incompletePosts ??
-    facebookPosts.filter(
-      (post) =>
-        post.expectedPhotos != null &&
-        (post.downloadedPhotos ?? post.images.length) < post.expectedPhotos,
-    ).length;
   const next = auctionDays.filter((d) => d >= today()).sort()[0];
   return (
     <aside className="details" aria-label="รายละเอียดทรัพย์">
@@ -538,145 +525,55 @@ export function PropertyDetails({
             ))}
             <section className="facebook">
               <h3>ประกาศและผลการขายจาก Facebook</h3>
-              <p className="muted small">
-                นัดที่ผ่านแล้วแสดงผลขาย นัดล่วงหน้าแสดงประกาศก่อนประมูล
-              </p>
-              <details>
-                <summary>ระบุลิงก์เพื่อดึงเฉพาะโพสต์นั้น</summary>
-                <input
-                  type="url"
-                  aria-label="ลิงก์โพสต์ Facebook"
-                  disabled={facebookLoading}
-                  value={fbPostUrl}
-                  onChange={(event) => setFbPostUrl(event.target.value)}
-                />
-              </details>
-              <button
-                type="button"
-                className="primary"
-                disabled={detailAction !== null}
-                aria-busy={facebookLoading}
-                onClick={async () => {
-                  setFbError("");
-                  try {
-                    await onFacebook(fbPostUrl);
-                  } catch (error) {
-                    setFbError((error as Error).message);
-                  }
-                }}
-              >
-                {facebookLoading && (
-                  <LoaderCircle
-                    size={16}
-                    className="action-spinner"
-                    aria-hidden="true"
-                  />
-                )}
-                {facebookLoading
-                  ? "กำลังค้นโพสต์และอ่านเลขคดีในรูป…"
-                  : "ดึงข้อมูลจาก Facebook"}
-              </button>
-              {fbError && (
-                <p className="small inline-error" role="status">
-                  {fbError}
+              {p.facebook?.checkedAt && (
+                <p className="small muted">
+                  คลังกลางอัปเดตเมื่อ {time(p.facebook.checkedAt)}
                 </p>
               )}
-              <a
-                className="text-link"
-                href="https://web.facebook.com/ledcm2"
-                target="_blank"
-                rel="noreferrer"
-              >
-                เปิดเพจต้นฉบับ <ExternalLink size={13} />
-              </a>
-              {p.facebook?.posts && (
-                <>
-                  <p className="small muted">
-                    ตรวจเมื่อ {time(p.facebook.checkedAt)} · อ่านได้{" "}
-                    {p.facebook.scannedPosts} โพสต์
-                  </p>
-                  {!!p.facebook.warnings?.length && (
-                    <ul className="small inline-error">
-                      {Array.from(new Set(p.facebook.warnings)).map(
-                        (warning) => (
-                          <li key={warning}>{warning}</li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                  {caseFilter && (
-                    <p className="small">
-                      {caseFilter.status === "matched"
-                        ? `พบเลขคดี ${p.caseNumber} ใน ${caseFilter.kept} จาก ${caseFilter.total} รูปที่ดึงได้`
-                        : incompleteFacebookPosts ||
-                            caseFilter.status === "incomplete"
-                          ? `ดึงรูปยังไม่ครบ เก็บได้ ${caseFilter.total} รูป จะเริ่มคัดเลขคดีเมื่อได้ครบทุกโพสต์`
-                          : caseFilter.status === "no_match"
-                            ? `OCR ไม่พบเลขคดี ${p.caseNumber} จึงเก็บทั้ง ${caseFilter.total} รูป`
-                            : `OCR อ่านเลขคดีได้ไม่ครบ จึงเก็บทั้ง ${caseFilter.total} รูป`}
-                      {caseFilter.status === "matched" &&
-                        incompleteFacebookPosts > 0 &&
-                        ` · ยังดึงรูปไม่ครบ ${incompleteFacebookPosts} โพสต์`}
-                      {caseFilter.checked < caseFilter.total &&
-                        ` · อ่านได้ ${caseFilter.checked} รูป`}
-                    </p>
-                  )}
-                  {!facebookPosts.length && (
-                    <p>
-                      {p.facebook.scannedPosts
-                        ? "ไม่พบโพสต์ที่เข้าเงื่อนไขวันประมูลและวันเผยแพร่ในโพสต์ที่ตรวจได้"
-                        : "อ่านโพสต์สาธารณะจาก Facebook ไม่ได้ในรอบนี้"}
-                    </p>
-                  )}
-                  {facebookPosts.map((post) => (
-                    <article className="facebook-post" key={post.url}>
-                      <a href={post.url} target="_blank" rel="noreferrer">
-                        {post.match.kind === "result"
-                          ? "ผลประมูล"
-                          : "ประกาศก่อนประมูล"}
-                        {" · "}วันประมูล {post.match.date}{" "}
-                        <ExternalLink size={13} />
-                      </a>
-                      <p className="small muted">เผยแพร่ {post.publishedOn}</p>
-                      {post.expectedPhotos != null &&
-                        post.downloadedPhotos != null && (
-                          <p className="small muted">
-                            ดึงได้ {post.downloadedPhotos} จาก{" "}
-                            {post.expectedPhotos} รูป
-                          </p>
-                        )}
-                      {post.expectedPhotos === null && (
-                        <p className="small muted">
-                          Facebook ยังไม่แสดงจำนวนรูปทั้งหมดของโพสต์นี้
-                        </p>
-                      )}
-                      <details>
-                        <summary>อ่านข้อความโพสต์</summary>
-                        <p>{post.text}</p>
-                      </details>
-                      <div className="facebook-images">
-                        {post.images.map((im) => (
-                          <button
-                            key={im.photoId}
-                            onClick={() => onImage(im.url, im.caseBoxes)}
-                          >
-                            <EvidenceImage
-                              lazy
-                              url={im.url}
-                              boxes={im.caseBoxes}
-                              alt={
-                                im.caseBoxes?.length
-                                  ? `ตารางประกาศพร้อมกรอบเลขคดี ${p.caseNumber}`
-                                  : "ตารางประกาศขายทอดตลาดฉบับเต็ม"
-                              }
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </>
+              {!facebookPosts.length && (
+                <p className="muted">
+                  คลังกลางยังไม่มีอัลบั้มที่ตรงกับวันประมูลของทรัพย์นี้
+                </p>
               )}
+              {facebookPosts.map((post) => (
+                <article className="facebook-post" key={post.url}>
+                  <a href={post.url} target="_blank" rel="noreferrer">
+                    {post.match.kind === "result"
+                      ? "ผลประมูล"
+                      : "ประกาศก่อนประมูล"}
+                    {" · "}วันประมูล {post.match.date}{" "}
+                    <ExternalLink size={13} />
+                  </a>
+                  <p className="small muted">เผยแพร่ {post.publishedOn}</p>
+                  {post.expectedPhotos != null &&
+                    post.downloadedPhotos != null && (
+                      <p className="small muted">
+                        ดึงได้ {post.downloadedPhotos} จาก {post.expectedPhotos}{" "}
+                        รูป
+                      </p>
+                    )}
+                  {post.expectedPhotos === null && (
+                    <p className="small muted">
+                      Facebook ยังไม่แสดงจำนวนรูปทั้งหมดของโพสต์นี้
+                    </p>
+                  )}
+                  <details>
+                    <summary>อ่านข้อความโพสต์</summary>
+                    <p>{post.text}</p>
+                  </details>
+                  <div className="facebook-images">
+                    {post.images.map((im) => (
+                      <button key={im.photoId} onClick={() => onImage(im.url)}>
+                        <EvidenceImage
+                          lazy
+                          url={im.url}
+                          alt={"ตารางประกาศขายทอดตลาดฉบับเต็ม"}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
             </section>
           </section>
         </div>

@@ -1,13 +1,5 @@
 import express from "express";
 import path from "node:path";
-import { facebookForDisplay } from "../domain/catalog.mjs";
-
-function propertyDetails(property) {
-  return {
-    ...property,
-    facebook: facebookForDisplay(property.facebook, property.auctionDates),
-  };
-}
 export function createCatalogHttp({
   repository: db,
   sync,
@@ -16,6 +8,10 @@ export function createCatalogHttp({
   root,
   evidencePath,
 }) {
+  const propertyDetails = async (property) => ({
+    ...property,
+    facebook: await facebook.forProperty(property),
+  });
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -46,6 +42,7 @@ export function createCatalogHttp({
       facebookAuctionSchedule: true,
       facebookFeedPermalinks: true,
       facebookPublicIndex: true,
+      facebookSharedAlbums: true,
       deedRefresh: true,
     };
     try {
@@ -72,6 +69,7 @@ export function createCatalogHttp({
       settings: await db.getSettings(),
       runtime: sync.status(),
       alerts: await db.alerts(),
+      facebookLibrary: await facebook.status(),
       lastCleanup: await db.getState("last_cleanup"),
     }),
   );
@@ -102,7 +100,7 @@ export function createCatalogHttp({
   app.get("/api/properties/:propertyId", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     p
-      ? res.json(propertyDetails(p))
+      ? res.json(await propertyDetails(p))
       : res.status(404).json({ error: "ไม่พบทรัพย์ อาจหมดอายุและถูกลบแล้ว" });
   });
   app.patch("/api/properties/:propertyId/user", async (req, res) =>
@@ -110,33 +108,20 @@ export function createCatalogHttp({
   );
   app.post("/api/properties/:propertyId/photos/refresh", async (req, res) => {
     const result = await sync.refreshPhotos(req.params.propertyId);
-    res.json({ ...result, property: propertyDetails(result.property) });
+    res.json({ ...result, property: await propertyDetails(result.property) });
   });
   app.post("/api/properties/:propertyId/deeds/refresh", async (req, res) => {
     const result = await sync.refreshDeeds(req.params.propertyId);
-    res.json({ ...result, property: propertyDetails(result.property) });
+    res.json({ ...result, property: await propertyDetails(result.property) });
   });
   app.post("/api/properties/:propertyId/facebook", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     if (!p) throw Error("ไม่พบทรัพย์");
-    const value = req.body?.postUrl;
-    if (value != null && (typeof value !== "string" || value.length > 1000))
-      throw Error("ลิงก์โพสต์ Facebook ไม่ถูกต้อง");
-    const postUrls = value?.trim()
-      ? [value.trim().split(/[?#]/)[0].replace(/\/$/, "")]
-      : [];
-    const result = await facebook.search(p, { postUrls });
-    await db.updateSource(p.id, { facebook: result });
-    for (const warning of result.warnings)
-      await db.alert("Facebook: " + warning);
-    if (!result.posts.length)
-      await db.alert(
-        `Facebook: ไม่พบโพสต์ที่ตรงวันสำหรับคดี ${p.caseNumber} ในช่วงโพสต์ที่ตรวจอ่านได้`,
-      );
-    const updated = await db.getProperty(p.id);
-    if (!updated) throw Error("ไม่พบทรัพย์");
-    res.json(propertyDetails(updated));
+    res.json(await propertyDetails(p));
   });
+  app.post("/api/facebook/library/refresh", async (_req, res) =>
+    res.json(await facebook.refresh()),
+  );
   app.use("/api", (req, res) => res.status(404).json({ error: "ไม่พบ API" }));
   app.use("/evidence", express.static(evidencePath, { dotfiles: "deny" }));
   app.use(express.static(path.join(root, "wwwroot")));
