@@ -45,6 +45,7 @@ export function createCatalogHttp({
       facebookPublicExactDates: true,
       facebookAuctionSchedule: true,
       facebookFeedPermalinks: true,
+      facebookPublicIndex: true,
       deedRefresh: true,
     };
     try {

@@ -21,9 +21,9 @@ export async function api<T>(
 }
 export async function requireFacebookAlbumBackend() {
   const health = await api<{
-    capabilities?: { facebookFeedPermalinks?: boolean };
+    capabilities?: { facebookPublicIndex?: boolean };
   }>("/health");
-  if (!health.capabilities?.facebookFeedPermalinks)
+  if (!health.capabilities?.facebookPublicIndex)
     throw Error(
       "Land Radar ยังใช้เซิร์ฟเวอร์รุ่นเก่า กรุณาหยุดโปรแกรมแล้วเปิด Start.cmd ใหม่ก่อนดึงรูป Facebook",
     );

@@ -15,6 +15,7 @@ import {
   selectFacebookPosts,
   facebookForDisplay,
   facebookPublicationRelevant,
+  facebookPublishedDay,
   defaultSettings,
 } from "../server/domain/catalog.mjs";
 test("defaults are weekly Chiang Mai city and only explicit deletion protection", () => {
@@ -278,6 +279,21 @@ test("does not reopen Facebook feed links outside the eligible publication dates
   assert.equal(facebookPublicationRelevant("2026-11-16", dates, today), true);
   assert.equal(facebookPublicationRelevant("2026-11-14", dates, today), false);
   assert.equal(facebookPublicationRelevant("2026-11-17", dates, today), false);
+});
+
+test("accepts the 29 October result caption and its same-day publication timestamp", () => {
+  const post = {
+    text: "🔍ผลการขายทอดตลาดทรัพย์\nประจำวันที่\u200b  29  ตุลาคม  2569",
+    publishedOn: facebookPublishedDay("Thursday 29 October 2026 at 16:40"),
+  };
+  assert.deepEqual(
+    matchPost(post, ["29/10/2569", "19/11/2569"], "2026-11-16"),
+    {
+      date: "2026-10-29",
+      auction: "2026-10-29",
+      kind: "result",
+    },
+  );
 });
 
 test("prefers results on auction day only once posted, and keeps announcements for future rounds", () => {
