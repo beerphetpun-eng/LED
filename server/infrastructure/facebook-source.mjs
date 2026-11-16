@@ -126,53 +126,31 @@ export async function readFacebookPosts(page) {
       return result;
     });
 }
-export function createFacebookSource(
-  evidencePath,
-  { maxScrolls = 20, profilePath } = {},
-) {
+
+export async function readFacebookPermalink(page, url) {
+  const posts = await readFacebookPosts(page);
+  const exact = posts.find(
+    (entry) => entry.url.replace(/\/$/, "") === url.replace(/\/$/, ""),
+  );
+  if (exact) return exact;
+
+  // The timestamp link can use another opaque identifier for the same post.
+  const canonical = await page
+    .locator('link[rel="canonical"]')
+    .evaluateAll((links) => links[0]?.href ?? "");
+  const id = /\/ledcm2\/posts\/(?:[^/]+\/)?(\d+)\/?$/.exec(canonical)?.[1];
+  return (
+    id &&
+    posts.find((entry) =>
+      entry.photoUrls.some(
+        (photo) => new URL(photo).searchParams.get("set") === `pcb.${id}`,
+      ),
+    )
+  );
+}
+export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
   let busy = false;
-  let signIn;
-  const browserOptions = {
-    locale: "en-US",
-    viewport: { width: 1440, height: 1100 },
-  };
-  const profileOptions = {
-    ...browserOptions,
-    ...(process.platform === "win32" ? { channel: "msedge" } : {}),
-    acceptDownloads: false,
-  };
-  async function openSignIn() {
-    if (!profilePath) throw Error("ยังไม่ได้ตั้งค่าเบราว์เซอร์ Facebook");
-    if (busy) throw Error("กำลังดึงรูป Facebook กรุณารอให้รอบนี้เสร็จ");
-    busy = true;
-    let context = signIn;
-    const opening = !context;
-    try {
-      if (!context) {
-        context = await chromium.launchPersistentContext(profilePath, {
-          ...profileOptions,
-          headless: false,
-        });
-        signIn = context;
-        context.on("close", () => {
-          if (signIn === context) signIn = undefined;
-        });
-      }
-      const page = context.pages()[0] || (await context.newPage());
-      await page.bringToFront();
-      if (opening)
-        await page.goto("https://www.facebook.com/login/", {
-          waitUntil: "domcontentloaded",
-          timeout: 30000,
-        });
-    } catch (error) {
-      await context?.close().catch(() => {});
-      throw error;
-    } finally {
-      busy = false;
-    }
-  }
-  async function search(property, nearbyDays = 0, { postUrls = [] } = {}) {
+  async function search(property, { postUrls = [] } = {}) {
     const requestedPosts = new Set(postUrls);
     if (postUrls.some((url) => !postUrl.test(url)))
       throw Error("ใช้ลิงก์โพสต์จากเพจสำนักงานบังคับคดีเชียงใหม่ (ledcm2)");
@@ -180,24 +158,17 @@ export function createFacebookSource(
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
     busy = true;
-    const interactiveContext = signIn;
-    let browser,
-      context = interactiveContext,
-      page,
-      staging;
+    let browser, staging;
     const runId = randomUUID();
     try {
       staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
-      if (!context && profilePath) {
-        context = await chromium.launchPersistentContext(profilePath, {
-          ...profileOptions,
-          headless: true,
-        });
-      } else if (!context) {
-        browser = await chromium.launch({ headless: true });
-        context = await browser.newContext(browserOptions);
-      }
-      page = await context.newPage();
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({
+        locale: "en-US",
+        viewport: { width: 1440, height: 1100 },
+        acceptDownloads: false,
+      });
+      const page = await context.newPage();
       page.setDefaultTimeout(15000);
       const found = new Map();
       const warnings = [];
@@ -250,10 +221,7 @@ export function createFacebookSource(
       for (const url of knownUrls) {
         if (!postUrl.test(url)) continue;
         const fromFeed = found.get(url);
-        if (
-          fromFeed &&
-          matchPost(fromFeed.text, property.auctionDates, nearbyDays)
-        )
+        if (fromFeed && matchPost(fromFeed.text, property.auctionDates))
           continue;
         try {
           await page.goto(url, {
@@ -264,19 +232,20 @@ export function createFacebookSource(
             .locator('a[href*="/photo"]')
             .first()
             .waitFor({ timeout: 10000 });
-          const post = (await readFacebookPosts(page)).find(
-            (entry) => entry.url.replace(/\/$/, "") === url.replace(/\/$/, ""),
-          );
-          if (post) found.set(url, { ...post, url });
+          const post = await readFacebookPermalink(page, url);
+          if (post) {
+            if (post.url !== url) found.delete(post.url);
+            found.set(url, { ...post, url });
+          }
         } catch {
           warnings.push("Facebook เปิดโพสต์ที่บันทึกไว้บางรายการไม่สำเร็จ");
         }
       }
       for (const url of requestedPosts) {
         const post = found.get(url);
-        if (post && !matchPost(post.text, property.auctionDates, nearbyDays))
+        if (post && !matchPost(post.text, property.auctionDates))
           warnings.push(
-            "วันที่ในลิงก์โพสต์ที่ระบุอยู่นอกช่วงวันประมูลที่เลือก",
+            "วันที่ในข้อความของโพสต์ที่ระบุไม่ตรงกับวันประมูลของทรัพย์",
           );
       }
       for (const [url, prior] of previousPosts) {
@@ -295,10 +264,9 @@ export function createFacebookSource(
       const candidates = [...found.values()]
         .map((p) => ({
           ...p,
-          match: matchPost(p.text, property.auctionDates, nearbyDays),
+          match: matchPost(p.text, property.auctionDates),
         }))
-        .filter((p) => p.match)
-        .sort((a, b) => a.match.days - b.match.days);
+        .filter((p) => p.match);
       const posts = [];
       for (const candidate of candidates) {
         const previousPost = previousPosts.get(candidate.url);
@@ -487,10 +455,10 @@ export function createFacebookSource(
         property.caseNumber,
         staging,
       );
-      const requiresSignIn =
-        loginRequired && filtered.caseFilter?.status === "incomplete";
-      if (requiresSignIn)
-        warnings.push("Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปถัดไป");
+      if (loginRequired && filtered.caseFilter?.status === "incomplete")
+        warnings.push(
+          "ตัวดูรูปสาธารณะของ Facebook ยังเปิดรูปถัดไปไม่ได้หลังรีเฟรช",
+        );
       const retained = new Set(
         filtered.posts.flatMap((post) => post.images.map((image) => image.url)),
       );
@@ -506,20 +474,8 @@ export function createFacebookSource(
         ...filtered,
         albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
         warnings,
-        requiresSignIn,
         scannedPosts: found.size,
-        nearbyDays,
-        note:
-          (requestedPosts.size
-            ? "ตรวจโพสต์ตามลิงก์ที่ระบุ และวันประมูล ±"
-            : "จับคู่คำว่า ขายทอดตลาดทรัพย์ และวันประมูล ±") +
-          nearbyDays +
-          " วัน" +
-          (requestedPosts.size
-            ? ""
-            : " จากโพสต์ที่หน้าเว็บเปิดให้เห็น (เลื่อนได้สูงสุด " +
-              maxScrolls +
-              " รอบ)"),
+        note: "ตรวจวันประมูลในข้อความของโพสต์สาธารณะ",
       };
     } catch (e) {
       throw Error(
@@ -529,17 +485,12 @@ export function createFacebookSource(
       );
     } finally {
       try {
-        try {
-          if (interactiveContext) await page?.close().catch(() => {});
-          else await context?.close();
-        } finally {
-          await browser?.close();
-        }
+        await browser?.close();
       } finally {
         busy = false;
         if (staging) await rm(staging, { recursive: true, force: true });
       }
     }
   }
-  return { search, openSignIn };
+  return { search };
 }

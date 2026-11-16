@@ -10,15 +10,7 @@ import {
 } from "lucide-react";
 import type { CaseBox, Property, UserNotes } from "./catalog-types";
 import { EvidenceImage } from "./EvidenceImage";
-import {
-  api,
-  mapParcels,
-  money,
-  requireFacebookAlbumBackend,
-  time,
-  today,
-  auctionDay,
-} from "./catalog-api";
+import { mapParcels, money, time, today, auctionDay } from "./catalog-api";
 import { approximateLocation } from "./approximate-location";
 
 function EvidenceStatus({ property }: { property: Property }) {
@@ -55,7 +47,7 @@ export function PropertyDetails({
   property: Property;
   onClose: () => void;
   onSave: (patch: Partial<UserNotes>) => Promise<void>;
-  onFacebook: (days: number, postUrl: string) => Promise<void>;
+  onFacebook: (postUrl: string) => Promise<void>;
   onRefreshPhotos: () => Promise<{
     checked: number;
     requested: number;
@@ -74,15 +66,13 @@ export function PropertyDetails({
     [savingComment, setSavingComment] = useState(false),
     [commentError, setCommentError] = useState(""),
     [fbBusy, setFbBusy] = useState(false),
-    [fbSignInBusy, setFbSignInBusy] = useState(false),
-    [fbSignInMessage, setFbSignInMessage] = useState(""),
+    [fbError, setFbError] = useState(""),
     [fbPostUrl, setFbPostUrl] = useState(""),
     [photoBusy, setPhotoBusy] = useState(false),
     [photoMessage, setPhotoMessage] = useState<{
       text: string;
       warning: boolean;
-    } | null>(null),
-    [days, setDays] = useState(0);
+    } | null>(null);
   const user = { ...p.user, ...pendingPreferences };
   const comment = commentDraft ?? p.user.comment;
   async function savePreferences(patch: Partial<Omit<UserNotes, "comment">>) {
@@ -111,19 +101,24 @@ export function PropertyDetails({
     }
   }
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
-  const caseFilter = p.facebook?.caseFilter;
+  const auctionDays = p.auctionDates.map(auctionDay);
+  const facebookPosts =
+    p.facebook?.posts.filter((post) => auctionDays.includes(post.match.date)) ??
+    [];
+  const caseFilter =
+    p.facebook &&
+    !p.facebook.nearbyDays &&
+    facebookPosts.length === p.facebook.posts.length
+      ? p.facebook.caseFilter
+      : undefined;
   const incompleteFacebookPosts =
     caseFilter?.incompletePosts ??
-    p.facebook?.posts.filter(
+    facebookPosts.filter(
       (post) =>
         post.expectedPhotos != null &&
         (post.downloadedPhotos ?? post.images.length) < post.expectedPhotos,
-    ).length ??
-    0;
-  const next = p.auctionDates
-    .map(auctionDay)
-    .filter((d) => d >= today())
-    .sort()[0];
+    ).length;
+  const next = auctionDays.filter((d) => d >= today()).sort()[0];
   return (
     <aside className="details" aria-label="รายละเอียดทรัพย์">
       <header>
@@ -486,19 +481,8 @@ export function PropertyDetails({
             <section className="facebook">
               <h3>ประกาศและผลการขายจาก Facebook</h3>
               <p className="muted small">
-                ค้นเพจสำนักงานบังคับคดีเชียงใหม่ด้วยวันประมูลและคำว่า
-                “ขายทอดตลาดทรัพย์” เก็บรูปเต็มสำหรับตรวจเลขคดีและลำดับ
+                ดึงรูปจากโพสต์สาธารณะที่ข้อความระบุวันประมูลตรงกับทรัพย์นี้
               </p>
-              <label>
-                ช่วงวันก่อน / หลังวันประมูล
-                <select value={days} onChange={(e) => setDays(+e.target.value)}>
-                  {[0, 3, 7, 14].map((d) => (
-                    <option key={d} value={d}>
-                      {d === 0 ? "เฉพาะวันตรงกัน" : `ก่อน / หลัง ${d} วัน`}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <details>
                 <summary>ระบุลิงก์เพื่อดึงเฉพาะโพสต์นั้น</summary>
                 <input
@@ -510,14 +494,14 @@ export function PropertyDetails({
               </details>
               <button
                 className="primary"
-                disabled={fbBusy || fbSignInBusy}
+                disabled={fbBusy}
                 onClick={async () => {
                   setFbBusy(true);
-                  setFbSignInMessage("");
+                  setFbError("");
                   try {
-                    await onFacebook(days, fbPostUrl);
+                    await onFacebook(fbPostUrl);
                   } catch (error) {
-                    setFbSignInMessage((error as Error).message);
+                    setFbError((error as Error).message);
                   } finally {
                     setFbBusy(false);
                   }
@@ -527,30 +511,9 @@ export function PropertyDetails({
                   ? "กำลังค้นโพสต์และอ่านเลขคดีในรูป…"
                   : "ดึงข้อมูลจาก Facebook"}
               </button>
-              <button
-                type="button"
-                disabled={fbBusy || fbSignInBusy}
-                onClick={async () => {
-                  setFbSignInBusy(true);
-                  setFbSignInMessage("");
-                  try {
-                    await requireFacebookAlbumBackend();
-                    await api("/facebook/sign-in", "POST");
-                    setFbSignInMessage(
-                      "เข้าสู่ระบบในหน้าต่าง Facebook แล้วกลับมากดดึงรูปอีกครั้ง",
-                    );
-                  } catch (error) {
-                    setFbSignInMessage((error as Error).message);
-                  } finally {
-                    setFbSignInBusy(false);
-                  }
-                }}
-              >
-                เปิดหน้าลงชื่อเข้าใช้ Facebook
-              </button>
-              {fbSignInMessage && (
-                <p className="small" role="status">
-                  {fbSignInMessage}
+              {fbError && (
+                <p className="small inline-error" role="status">
+                  {fbError}
                 </p>
               )}
               <a
@@ -564,14 +527,8 @@ export function PropertyDetails({
               {p.facebook?.posts && (
                 <>
                   <p className="small muted">
-                    ตรวจเมื่อ {time(p.facebook.checkedAt)} · {p.facebook.note}
+                    ตรวจเมื่อ {time(p.facebook.checkedAt)}
                   </p>
-                  {p.facebook.requiresSignIn && (
-                    <p className="small inline-error" role="status">
-                      Facebook ขอให้เข้าสู่ระบบเพื่อเปิดรูปที่เหลือ
-                      ใช้ปุ่มเปิดหน้าลงชื่อเข้าใช้แล้วกดดึงรูปอีกครั้ง
-                    </p>
-                  )}
                   {caseFilter && (
                     <p className="small">
                       {caseFilter.status === "matched"
@@ -589,16 +546,15 @@ export function PropertyDetails({
                         ` · อ่านได้ ${caseFilter.checked} รูป`}
                     </p>
                   )}
-                  {!p.facebook.posts.length && (
-                    <p>ไม่พบโพสต์ที่ตรงในช่วงที่ตรวจอ่านได้</p>
+                  {!facebookPosts.length && (
+                    <p>
+                      ไม่พบโพสต์ที่ระบุวันประมูลตรงกับทรัพย์นี้ในโพสต์ที่ตรวจได้
+                    </p>
                   )}
-                  {p.facebook.posts.map((post) => (
+                  {facebookPosts.map((post) => (
                     <article className="facebook-post" key={post.url}>
                       <a href={post.url} target="_blank" rel="noreferrer">
-                        {post.match.days === 0
-                          ? "วันตรงกัน"
-                          : `วันที่ห่าง ${post.match.days} วัน`}{" "}
-                        · {post.match.date} <ExternalLink size={13} />
+                        วันประมูล · {post.match.date} <ExternalLink size={13} />
                       </a>
                       {post.expectedPhotos != null &&
                         post.downloadedPhotos != null && (
