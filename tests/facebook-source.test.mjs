@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
 import {
   navigateFacebookPhoto,
+  readFacebookPermalink,
   readFacebookPosts,
 } from "../server/infrastructure/facebook-source.mjs";
 
@@ -26,6 +27,25 @@ test("public feed extraction keeps post text and observed photo links together",
     assert.equal(posts[1].photoUrls.length, 2);
     assert.match(posts[1].albumStart, /fbid=457/);
     assert.equal(posts[1].expectedPhotos, 17);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("identifies the requested public album when Facebook changes its timestamp link", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <link rel="canonical" href="https://web.facebook.com/ledcm2/posts/sale-results/789/">
+      <article><a href="https://web.facebook.com/ledcm2/posts/unrelated">today</a><p>ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=111&set=pcb.1">photo</a></article>
+      <article><a href="https://web.facebook.com/ledcm2/posts/differentId">today</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=222&set=pcb.789">photo</a></article>`);
+    const album = await readFacebookPermalink(
+      page,
+      "https://web.facebook.com/ledcm2/posts/originalId",
+    );
+    assert.match(album.text, /5 พฤศจิกายน/);
+    assert.match(album.photoUrls[0], /fbid=222/);
   } finally {
     await browser.close();
   }

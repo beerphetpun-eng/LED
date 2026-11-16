@@ -32,6 +32,7 @@ test("database outages preserve server identity and malformed JSON stays out of 
   const healthBody = await health.json();
   assert.equal(healthBody.source, "LED + LandsMaps");
   assert.equal(healthBody.capabilities.facebookAlbumCoverage, true);
+  assert.equal(healthBody.capabilities.facebookPublicExactDates, true);
   const malformed = await fetch(url + "/api/sync/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
@@ -42,7 +43,7 @@ test("database outages preserve server identity and malformed JSON stays out of 
   assert.deepEqual(messages, []);
 });
 
-test("passes an explicitly selected Facebook post for a targeted exact-date search", async (t) => {
+test("passes an explicitly selected public post without allowing a date range or sign-in", async (t) => {
   const property = { id: "a".repeat(32) };
   const post = "https://web.facebook.com/ledcm2/posts/example";
   let search;
@@ -68,9 +69,17 @@ test("passes an explicitly selected Facebook post for a targeted exact-date sear
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
-      body: JSON.stringify({ postUrl: post + "?ref=feed" }),
+      body: JSON.stringify({ postUrl: post + "?ref=feed", nearbyDays: 7 }),
     },
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(search, [property, 0, { postUrls: [post] }]);
+  assert.deepEqual(search, [property, { postUrls: [post] }]);
+  const signIn = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/facebook/sign-in`,
+    {
+      method: "POST",
+      headers: { "X-Land-Radar": "1" },
+    },
+  );
+  assert.equal(signIn.status, 404);
 });

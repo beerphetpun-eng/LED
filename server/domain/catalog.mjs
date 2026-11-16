@@ -278,7 +278,7 @@ export function postDates(text) {
     ),
   ];
 }
-export function matchPost(text, auctionDates, nearbyDays = 0) {
+export function matchPost(text, auctionDates) {
   const content = clean(text).replace(/[\u200b-\u200f]/g, "");
   const title = /ขาย\s*ทอดตลาด\s*ทรัพย์/.exec(content);
   if (!title) return null;
@@ -289,18 +289,7 @@ export function matchPost(text, auctionDates, nearbyDays = 0) {
       ? caption.slice(datedCaption.index + datedCaption[0].length)
       : caption,
   )[0];
-  if (!date) return null;
-  const auctions = auctionDates.map(auctionISO).filter(Boolean);
-  let best = null;
-  for (const auction of auctions) {
-    const days = Math.abs((Date.parse(date) - Date.parse(auction)) / 86400000);
-    if (days <= nearbyDays && (!best || days < best.days))
-      best = {
-        date,
-        auction,
-        days,
-        kind: days === 0 ? "exact_date" : "nearby_date",
-      };
-  }
-  return best;
+  return date && auctionDates.some((auction) => auctionISO(auction) === date)
+    ? { date, auction: date, days: 0, kind: "exact_date" }
+    : null;
 }

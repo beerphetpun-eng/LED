@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import {
   BrowserService,
   root,
@@ -30,11 +29,7 @@ const app = createCatalogHttp({
   repository: db,
   sync,
   geography,
-  facebook: createFacebookSource(evidencePath, {
-    profilePath: fileURLToPath(
-      new URL("./data/facebook-profile/", import.meta.url),
-    ),
-  }),
+  facebook: createFacebookSource(evidencePath),
   root,
   evidencePath,
 });

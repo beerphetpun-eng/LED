@@ -32,7 +32,10 @@ export function createCatalogHttp({
     next();
   });
   app.get("/api/health", async (req, res) => {
-    const capabilities = { facebookAlbumCoverage: true };
+    const capabilities = {
+      facebookAlbumCoverage: true,
+      facebookPublicExactDates: true,
+    };
     try {
       await db.health();
       res.json({
@@ -96,23 +99,16 @@ export function createCatalogHttp({
   app.post("/api/properties/:propertyId/photos/refresh", async (req, res) =>
     res.json(await sync.refreshPhotos(req.params.propertyId)),
   );
-  app.post("/api/facebook/sign-in", async (req, res) => {
-    await facebook.openSignIn();
-    res.json({ ok: true });
-  });
   app.post("/api/properties/:propertyId/facebook", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     if (!p) throw Error("ไม่พบทรัพย์");
-    const days = req.body?.nearbyDays ?? 0;
-    if (![0, 3, 7, 14].includes(days))
-      throw Error("เลือกช่วงวัน 0, 3, 7 หรือ 14 วัน");
     const value = req.body?.postUrl;
     if (value != null && (typeof value !== "string" || value.length > 1000))
       throw Error("ลิงก์โพสต์ Facebook ไม่ถูกต้อง");
     const postUrls = value?.trim()
       ? [value.trim().split(/[?#]/)[0].replace(/\/$/, "")]
       : [];
-    const result = await facebook.search(p, days, { postUrls });
+    const result = await facebook.search(p, { postUrls });
     await db.updateSource(p.id, { facebook: result });
     for (const warning of result.warnings)
       await db.alert("Facebook: " + warning);

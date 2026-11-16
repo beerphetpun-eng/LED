@@ -267,13 +267,12 @@ function App() {
     );
     void loadLibrary().catch((e) => setError(e.message));
   }
-  async function facebook(days: number, postUrl: string) {
+  async function facebook(postUrl: string) {
     if (!selected) return;
     const id = selected.id;
     await report("กำลังอ่าน Facebook", async () => {
       await requireFacebookAlbumBackend();
       const p = await api<Property>("/properties/" + id + "/facebook", "POST", {
-        nearbyDays: days,
         postUrl,
       });
       setSelected((current) =>
