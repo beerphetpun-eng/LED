@@ -114,6 +114,72 @@ async function waitFor(s, status) {
   throw Error("did not enter " + status);
 }
 
+test("manual deed refresh rechecks only the selected property and preserves complete prior evidence", async () => {
+  const calls = [];
+  const prior = {
+    deed: "1",
+    status: "located",
+    latitude: 18,
+    longitude: 98,
+    mapEvidenceUrl: "/evidence/old.png",
+    backgroundReady: true,
+  };
+  const t = setup(false, false, {
+    async locate(property, deed) {
+      calls.push([property.id, deed]);
+      return deed === "1"
+        ? {
+            ...prior,
+            latitude: 19,
+            backgroundReady: false,
+            note: "ภาพพื้นหลังยังโหลดไม่ครบ",
+          }
+        : { ...prior, deed: "2", mapEvidenceUrl: "/evidence/new.png" };
+    },
+  });
+  t.records.set("one", { id: "one", deed: "1, 2", parcels: [prior] });
+  t.records.set("other", { id: "other", deed: "3", parcels: [] });
+  const pending = t.service.refreshDeeds("one");
+  await assert.rejects(t.service.refreshDeeds("other"), /กำลังทำงาน/);
+  const result = await pending;
+  assert.deepEqual(calls, [
+    ["one", "1"],
+    ["one", "2"],
+  ]);
+  assert.equal(result.requested, 2);
+  assert.equal(result.confirmed, 1);
+  assert.equal(
+    result.property.parcels.find((p) => p.deed === "1").mapEvidenceUrl,
+    prior.mapEvidenceUrl,
+  );
+  assert.equal(
+    result.property.parcels.find((p) => p.deed === "1").latitude,
+    prior.latitude,
+  );
+  assert.equal(
+    result.property.parcels.find((p) => p.deed === "1").lookupWarning,
+    "ภาพพื้นหลังยังโหลดไม่ครบ",
+  );
+  assert.equal(t.records.get("other").parcels.length, 0);
+});
+
+test("manual deed refresh shares LandsMaps quota cooldown with automatic search", async () => {
+  let attempts = 0;
+  const t = setup(false, false, {
+    async locate() {
+      attempts++;
+      throw new SourceRateLimitError("LandsMaps จำกัดจำนวนการค้นหา");
+    },
+  });
+  t.records.set("one", { id: "one", deed: "1, 2", parcels: [] });
+  await assert.rejects(t.service.refreshDeeds("one"), SourceRateLimitError);
+  assert.equal(t.service.status().status, "waiting_limit");
+  assert.equal(t.service.status().geoRetryAt, "2026-11-12T17:02:00.000Z");
+  await assert.rejects(t.service.refreshDeeds("one"), /รอโควตา/);
+  await assert.rejects(t.service.start(true), /รอโควตา/);
+  assert.equal(attempts, 1);
+});
+
 test("scheduler processes all scopes without waiting for user input", async () => {
   const t = setup();
   await t.service.init();

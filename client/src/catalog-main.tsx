@@ -27,6 +27,7 @@ import type {
   Province,
   UserNotes,
   CaseBox,
+  DetailAction,
 } from "./catalog-types";
 import {
   api,
@@ -103,6 +104,7 @@ function App() {
     [tab, setTab] = useState("explore"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(""),
+    [detailAction, setDetailAction] = useState<DetailAction | null>(null),
     [full, setFull] = useState(false),
     [filtersCollapsed, setFiltersCollapsed] = useState(true),
     [view, setView] = useState<"map" | "list">("map"),
@@ -133,6 +135,7 @@ function App() {
   const filtersRef = useRef(filters),
     requestNumber = useRef(0),
     selectionRequest = useRef(0),
+    activeDetailRequest = useRef<DetailAction | null>(null),
     userWriteVersion = useRef(0),
     selectedId = useRef<string | null>(null);
   filtersRef.current = filters;
@@ -270,28 +273,73 @@ function App() {
   async function facebook(postUrl: string) {
     if (!selected) return;
     const id = selected.id;
-    await report("กำลังอ่าน Facebook", async () => {
-      await requireFacebookAlbumBackend();
-      const p = await api<Property>("/properties/" + id + "/facebook", "POST", {
-        postUrl,
-      });
-      setSelected((current) =>
-        current?.id === id ? { ...p, user: current.user } : current,
-      );
-      await loadSync();
+    return runDetailAction("facebook", async () => {
+      try {
+        await report("กำลังอ่าน Facebook", async () => {
+          await requireFacebookAlbumBackend();
+          const p = await api<Property>(
+            "/properties/" + id + "/facebook",
+            "POST",
+            { postUrl },
+          );
+          setSelected((current) =>
+            current?.id === id ? { ...current, facebook: p.facebook } : current,
+          );
+        });
+      } finally {
+        void loadSync().catch(() => {});
+      }
+    });
+  }
+  async function runDetailAction<T>(
+    action: DetailAction,
+    work: () => Promise<T>,
+  ) {
+    if (activeDetailRequest.current)
+      throw Error("กรุณารอให้งานปัจจุบันเสร็จก่อน");
+    activeDetailRequest.current = action;
+    setDetailAction(action);
+    try {
+      return await work();
+    } finally {
+      activeDetailRequest.current = null;
+      setDetailAction(null);
+    }
+  }
+  async function refreshDeeds(id: string) {
+    return runDetailAction("deeds", async () => {
+      try {
+        const result = await api<{
+          property: Property;
+          confirmed: number;
+          requested: number;
+        }>(`/properties/${id}/deeds/refresh`, "POST");
+        const { parcels, status } = result.property;
+        setSelected((current) =>
+          current?.id === id ? { ...current, parcels, status } : current,
+        );
+        return result;
+      } finally {
+        void loadLibrary().catch(() => {});
+        void loadSync().catch(() => {});
+      }
     });
   }
   async function refreshPhotos(id: string) {
-    const result = await api<{
-      property: Property;
-      checked: number;
-      requested: number;
-      complete: boolean;
-    }>(`/properties/${id}/photos/refresh`, "POST");
-    setSelected((current) =>
-      current?.id === id ? { ...result.property, user: current.user } : current,
-    );
-    return result;
+    return runDetailAction("photos", async () => {
+      const result = await api<{
+        property: Property;
+        checked: number;
+        requested: number;
+        complete: boolean;
+      }>(`/properties/${id}/photos/refresh`, "POST");
+      setSelected((current) =>
+        current?.id === id
+          ? { ...result.property, user: current.user }
+          : current,
+      );
+      return result;
+    });
   }
   function exportJSON() {
     const blob = new Blob([JSON.stringify(library.items, null, 2)], {
@@ -873,6 +921,8 @@ function App() {
           onClose={closeDetails}
           onSave={(patch) => saveUser(selected.id, patch)}
           onFacebook={facebook}
+          detailAction={detailAction}
+          onRefreshDeeds={() => refreshDeeds(selected.id)}
           onRefreshPhotos={() => refreshPhotos(selected.id)}
           onImage={(url, caseBoxes) => setImage({ url, caseBoxes })}
         />

@@ -5,6 +5,7 @@ export type UserNotes = {
   auctionStatus: string;
   protected: boolean;
 };
+export type DetailAction = "photos" | "deeds" | "facebook";
 export type Parcel = {
   deed: string;
   latitude: number | null;
