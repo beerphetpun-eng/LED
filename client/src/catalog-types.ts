@@ -27,7 +27,6 @@ export type FacebookResult = {
   note: string;
   scannedPosts: number;
   warnings: string[];
-  nearbyDays?: number;
   caseFilter?: {
     status: "matched" | "no_match" | "unreadable" | "incomplete";
     checked: number;
@@ -38,7 +37,8 @@ export type FacebookResult = {
   posts: {
     url: string;
     text: string;
-    match: { date: string; auction: string; days: number; kind: string };
+    publishedOn: string;
+    match: { date: string; auction: string; kind: "result" | "announcement" };
     images: {
       url: string;
       sourceUrl: string;

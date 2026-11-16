@@ -12,6 +12,8 @@ import {
   validateUser,
   validateSettings,
   matchPost,
+  selectFacebookPosts,
+  facebookForDisplay,
   defaultSettings,
 } from "../server/domain/catalog.mjs";
 test("defaults are weekly Chiang Mai city and only explicit deletion protection", () => {
@@ -190,28 +192,130 @@ test("scope settings reject unknown districts and never accept price conditions"
   );
   assert.throws(() => validateSettings({ ...s, scopes: [] }, g));
 });
-test("Facebook matching tolerates formatting and Thai digits but never matches unrelated posts", () => {
-  const dates = ["12/11/2569"];
+test("Facebook accepts only the correct auction type and a publication day on the correct side within three days", () => {
+  const dates = ["10/11/2569"];
+  const announcement = "✨ บัญชีขายทอดตลาดทรัพย์ วันที่  ๑๐  พฤศจิกายน  ๒๕๖๙";
+  const result = "ผลการขายทอดตลาดทรัพย์ ประจำวันที่\u200b 10 พฤศจิกายน 2569";
   assert.equal(
-    matchPost("✨ บัญชีขายทอดตลาดทรัพย์ วันที่  ๑๒  พฤศจิกายน  ๒๕๖๙", dates)
-      .days,
-    0,
+    matchPost(
+      { text: announcement, publishedOn: "2026-11-07" },
+      dates,
+      "2026-11-08",
+    )?.kind,
+    "announcement",
   );
   assert.equal(
     matchPost(
-      "ผลการขายทอดตลาดทรัพย์ ประจำวันที่\u200b 5 พฤศจิกายน 2569",
+      { text: announcement, publishedOn: "2026-11-06" },
       dates,
+      "2026-11-08",
     ),
     null,
   );
-  assert.equal(matchPost("งานมหกรรม 12 พฤศจิกายน 2569", dates), null);
-  assert.equal(matchPost("ขายทอดตลาดทรัพย์ 5 พฤศจิกายน 2569", dates), null);
+  assert.equal(
+    matchPost(
+      { text: announcement, publishedOn: "2026-11-09" },
+      dates,
+      "2026-11-11",
+    ),
+    null,
+  );
+  assert.equal(
+    matchPost({ text: result, publishedOn: "2026-11-13" }, dates, "2026-11-14")
+      ?.kind,
+    "result",
+  );
+  assert.equal(
+    matchPost({ text: result, publishedOn: "2026-11-14" }, dates, "2026-11-15"),
+    null,
+  );
+  assert.equal(
+    matchPost({ text: result, publishedOn: "2026-11-09" }, dates, "2026-11-11"),
+    null,
+  );
+  assert.equal(matchPost({ text: result }, dates, "2026-11-15"), null);
 });
 
 test("Facebook requires the auction date in the caption even when other dates match", () => {
-  const posted =
-    "29/10/2569 ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 5 พฤศจิกายน 2569 นัดถัดไป 19/11/2569";
-  const dates = ["29/10/2569", "19/11/2569"];
-  assert.equal(matchPost(posted, dates), null);
-  assert.equal(matchPost(posted, ["05/11/2569"])?.days, 0);
+  const posted = {
+    text: "7/11/2569 ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 5 พฤศจิกายน 2569 นัดถัดไป 19/11/2569",
+    publishedOn: "2026-11-07",
+  };
+  assert.equal(
+    matchPost(posted, ["07/11/2569", "19/11/2569"], "2026-11-08"),
+    null,
+  );
+  assert.equal(
+    matchPost(posted, ["05/11/2569"], "2026-11-08")?.date,
+    "2026-11-05",
+  );
+  assert.equal(
+    matchPost(
+      {
+        ...posted,
+        text: "ผลการขายทอดตลาดทรัพย์ หมายเหตุ ข้อมูล ณ วันที่ 5 พฤศจิกายน 2569",
+      },
+      ["05/11/2569"],
+      "2026-11-08",
+    ),
+    null,
+  );
+  assert.equal(
+    matchPost(
+      { ...posted, text: "งานมหกรรม 5 พฤศจิกายน 2569" },
+      ["05/11/2569"],
+      "2026-11-08",
+    ),
+    null,
+  );
+});
+
+test("prefers results on auction day only once posted, and keeps announcements for future rounds", () => {
+  const announcement = {
+    text: "ประกาศการขายทอดตลาดทรัพย์ วันที่ 10/11/2569",
+    publishedOn: "2026-11-09",
+  };
+  const future = {
+    text: "บัญชีขายทอดตลาดทรัพย์ วันที่ 12/11/2569",
+    publishedOn: "2026-11-10",
+  };
+  const result = {
+    text: "ผลขายทอดตลาดทรัพย์ วันที่ 10/11/2569",
+    publishedOn: "2026-11-10",
+  };
+  const dates = ["10/11/2569", "12/11/2569"];
+  assert.deepEqual(
+    selectFacebookPosts([announcement], dates, "2026-11-10").map(
+      (p) => p.match.kind,
+    ),
+    ["announcement"],
+  );
+  assert.deepEqual(
+    selectFacebookPosts(
+      [announcement, result, future],
+      dates,
+      "2026-11-10",
+    ).map((p) => [p.match.date, p.match.kind]),
+    [
+      ["2026-11-10", "result"],
+      ["2026-11-12", "announcement"],
+    ],
+  );
+});
+
+test("a previously saved announcement no longer appears after its auction date", () => {
+  const archived = {
+    posts: [
+      {
+        url: "announcement",
+        text: "บัญชีขายทอดตลาดทรัพย์ วันที่ 10/11/2568",
+        publishedOn: "2025-11-09",
+      },
+    ],
+    caseFilter: { status: "matched" },
+  };
+  const displayed = facebookForDisplay(archived, ["10/11/2568"], "2025-11-11");
+  assert.deepEqual(displayed.posts, []);
+  assert.equal(displayed.caseFilter, undefined);
+  assert.equal(archived.posts.length, 1);
 });

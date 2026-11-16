@@ -1,5 +1,13 @@
 import express from "express";
 import path from "node:path";
+import { facebookForDisplay } from "../domain/catalog.mjs";
+
+function propertyDetails(property) {
+  return {
+    ...property,
+    facebook: facebookForDisplay(property.facebook, property.auctionDates),
+  };
+}
 export function createCatalogHttp({
   repository: db,
   sync,
@@ -35,6 +43,7 @@ export function createCatalogHttp({
     const capabilities = {
       facebookAlbumCoverage: true,
       facebookPublicExactDates: true,
+      facebookAuctionSchedule: true,
     };
     try {
       await db.health();
@@ -90,7 +99,7 @@ export function createCatalogHttp({
   app.get("/api/properties/:propertyId", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     p
-      ? res.json(p)
+      ? res.json(propertyDetails(p))
       : res.status(404).json({ error: "ไม่พบทรัพย์ อาจหมดอายุและถูกลบแล้ว" });
   });
   app.patch("/api/properties/:propertyId/user", async (req, res) =>
@@ -116,7 +125,9 @@ export function createCatalogHttp({
       await db.alert(
         `Facebook: ไม่พบโพสต์ที่ตรงวันสำหรับคดี ${p.caseNumber} ในช่วงโพสต์ที่ตรวจอ่านได้`,
       );
-    res.json(await db.getProperty(p.id));
+    const updated = await db.getProperty(p.id);
+    if (!updated) throw Error("ไม่พบทรัพย์");
+    res.json(propertyDetails(updated));
   });
   app.use("/api", (req, res) => res.status(404).json({ error: "ไม่พบ API" }));
   app.use("/evidence", express.static(evidencePath, { dotfiles: "deny" }));
