@@ -43,6 +43,7 @@ export function createCatalogHttp({
       facebookFeedPermalinks: true,
       facebookPublicIndex: true,
       facebookSharedAlbums: true,
+      facebookCaseFilter: true,
       deedRefresh: true,
     };
     try {

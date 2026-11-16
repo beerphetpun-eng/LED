@@ -232,6 +232,7 @@ export function createFacebookSource(
   {
     maxScrolls = 20,
     postIndex,
+    caseIndex,
     readCatalog = async () => ({ dates: [], legacy: [] }),
     launchBrowser = () => chromium.launch({ headless: true }),
     downloadAlbum = downloadFacebookAlbum,
@@ -515,7 +516,9 @@ export function createFacebookSource(
     );
     return {
       checkedAt: index.checkedAt,
-      posts,
+      ...(caseIndex
+        ? await caseIndex.forAlbums(posts, property.caseNumber)
+        : { posts }),
     };
   }
 

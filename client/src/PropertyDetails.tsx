@@ -113,6 +113,7 @@ export function PropertyDetails({
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const auctionDays = p.auctionDates.map(auctionDay);
   const facebookPosts = p.facebook?.posts ?? [];
+  const facebookFilter = p.facebook?.caseFilter;
   const next = auctionDays.filter((d) => d >= today()).sort()[0];
   return (
     <aside className="details" aria-label="รายละเอียดทรัพย์">
@@ -530,10 +531,46 @@ export function PropertyDetails({
                   คลังกลางอัปเดตเมื่อ {time(p.facebook.checkedAt)}
                 </p>
               )}
-              {!facebookPosts.length && (
+              {!facebookFilter && !facebookPosts.length && (
                 <p className="muted">
                   คลังกลางยังไม่มีอัลบั้มที่ตรงกับวันประมูลของทรัพย์นี้
                 </p>
+              )}
+              {facebookFilter && (
+                <div className="small" role="status">
+                  {facebookFilter.status === "scanning" && (
+                    <p>
+                      กำลังคัดเลขคดีจากคลังกลาง ({facebookFilter.checked}/
+                      {facebookFilter.total} รูป)
+                    </p>
+                  )}
+                  {facebookFilter.matched > 0 && (
+                    <p>
+                      พบเลขคดี {p.caseNumber} ใน {facebookFilter.matched} รูป
+                    </p>
+                  )}
+                  {facebookFilter.status === "no_match" && (
+                    <p>
+                      ไม่พบเลขคดี {p.caseNumber} ใน {facebookFilter.checked}{" "}
+                      รูปที่ตรวจแล้ว
+                    </p>
+                  )}
+                  {facebookFilter.status === "no_case" && (
+                    <p>ทรัพย์นี้ไม่มีเลขคดีในรูปแบบที่ใช้คัดรูปได้</p>
+                  )}
+                  {facebookFilter.incomplete > 0 && (
+                    <p className="muted">
+                      คลังยังมี {facebookFilter.incomplete}{" "}
+                      อัลบั้มที่ดึงรูปไม่ครบ
+                    </p>
+                  )}
+                  {facebookFilter.unreadable > 0 && (
+                    <p className="muted">
+                      อ่านเลขคดีไม่ได้ {facebookFilter.unreadable} รูป
+                      จะลองตรวจอีกครั้ง
+                    </p>
+                  )}
+                </div>
               )}
               {facebookPosts.map((post) => (
                 <article className="facebook-post" key={post.url}>
@@ -563,10 +600,14 @@ export function PropertyDetails({
                   </details>
                   <div className="facebook-images">
                     {post.images.map((im) => (
-                      <button key={im.photoId} onClick={() => onImage(im.url)}>
+                      <button
+                        key={im.photoId}
+                        onClick={() => onImage(im.url, im.caseBoxes)}
+                      >
                         <EvidenceImage
                           lazy
                           url={im.url}
+                          boxes={im.caseBoxes}
                           alt={"ตารางประกาศขายทอดตลาดฉบับเต็ม"}
                         />
                       </button>

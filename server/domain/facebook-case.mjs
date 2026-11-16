@@ -5,13 +5,24 @@ const normalize = (text) =>
     .replace(/[.\s\u200b-\u200f]/g, "")
     .toUpperCase();
 
-export function caseBoxes(lines, caseNumber, width, height) {
-  const target = normalize(caseNumber || "").match(
+export function facebookCaseNumber(caseNumber) {
+  const parts = normalize(caseNumber || "").match(
     /^([\p{L}]+)(\d+)\/(\d{4})$/u,
   );
-  if (!target) return [];
-  const [, prefix, number, year] = target;
-  const matches = [];
+  return parts ? `${parts[1].replace(/E$/, "")}${parts[2]}/${parts[3]}` : null;
+}
+
+export function findFacebookCaseBoxes(index, caseNumber) {
+  const key = facebookCaseNumber(caseNumber);
+  if (!key || !index) return [];
+  const short = key.replace(/\/(\d{2})(\d{2})$/, "/$2");
+  const lookup = (rows) => [...(rows?.[key] || []), ...(rows?.[short] || [])];
+  const column = lookup(index.column);
+  return column.length ? column : lookup(index.fullPage);
+}
+
+export function indexFacebookCases(lines, width, height) {
+  const matches = {};
   for (const line of lines) {
     let text = "";
     const boxes = [];
@@ -24,12 +35,7 @@ export function caseBoxes(lines, caseNumber, width, height) {
     }
     for (const match of text.matchAll(/([\p{L}]+)(\d+)\/(\d{2,4})(?!\d)/gu)) {
       const [, photoPrefix, photoNumber, photoYear] = match;
-      if (
-        photoPrefix.replace(/E$/, "") !== prefix.replace(/E$/, "") ||
-        photoNumber !== number ||
-        (photoYear !== year && photoYear !== year.slice(-2))
-      )
-        continue;
+      if (photoYear.length === 3) continue;
       const symbols = boxes.slice(match.index, match.index + match[0].length);
       const left = Math.max(0, Math.min(...symbols.map((b) => b.x0)) - 2);
       const top = Math.max(0, Math.min(...symbols.map((b) => b.y0)) - 2);
@@ -38,14 +44,23 @@ export function caseBoxes(lines, caseNumber, width, height) {
         height,
         Math.max(...symbols.map((b) => b.y1)) + 2,
       );
-      if (right > left && bottom > top)
-        matches.push({
+      if (right > left && bottom > top) {
+        const key = `${photoPrefix.replace(/E$/, "")}${photoNumber}/${photoYear}`;
+        (matches[key] ||= []).push({
           x: left / width,
           y: top / height,
           width: (right - left) / width,
           height: (bottom - top) / height,
         });
+      }
     }
   }
   return matches;
+}
+
+export function caseBoxes(lines, caseNumber, width, height) {
+  return findFacebookCaseBoxes(
+    { column: indexFacebookCases(lines, width, height) },
+    caseNumber,
+  );
 }
