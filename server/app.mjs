@@ -25,11 +25,17 @@ const sync = createSyncService({
   geography,
 });
 await sync.init();
+const facebook = createFacebookSource(evidencePath, {
+  postIndex: {
+    read: () => db.getState("facebook_public_posts", { posts: [] }),
+    write: (data) => db.setState("facebook_public_posts", data),
+  },
+});
 const app = createCatalogHttp({
   repository: db,
   sync,
   geography,
-  facebook: createFacebookSource(evidencePath),
+  facebook,
   root,
   evidencePath,
 });
@@ -37,6 +43,7 @@ const server = app.listen(5080, "127.0.0.1", (error) => {
   if (error) throw error;
   console.log("Land Radar: http://127.0.0.1:5080");
   sync.schedule();
+  facebook.scheduleIndex();
   if (process.argv.includes("--open"))
     execFile(
       "explorer.exe",
@@ -50,7 +57,7 @@ async function stop() {
   if (stopping) return;
   stopping = true;
   server.close();
-  await Promise.all([sync.stop(), browser.close()]);
+  await Promise.all([sync.stop(), browser.close(), facebook.stopIndex()]);
   await db.close();
   process.exit();
 }

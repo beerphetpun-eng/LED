@@ -1,11 +1,101 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { chromium } from "../server/node_modules/playwright/index.mjs";
 import {
   navigateFacebookPhoto,
+  createFacebookSource,
+  nextFacebookArchiveLink,
   readFacebookPermalink,
   readFacebookPosts,
 } from "../server/infrastructure/facebook-source.mjs";
+
+test("archive discovery follows the nearest unvisited public post around the auction date", () => {
+  const url = (id) => `https://web.facebook.com/ledcm2/posts/${id}`;
+  const posts = [
+    { url: url("first"), publishedOn: "2026-11-05" },
+    { url: url("nearer"), publishedOn: "2026-10-30" },
+    {
+      url: "https://example.com/ledcm2/posts/foreign",
+      publishedOn: "2026-10-29",
+    },
+  ];
+  assert.equal(
+    nextFacebookArchiveLink(posts, ["2026-10-29"], new Set()),
+    url("nearer"),
+  );
+  assert.equal(
+    nextFacebookArchiveLink(posts, ["2026-10-29"], new Set([url("nearer")])),
+    url("first"),
+  );
+});
+
+test("automatic search reuses a verified indexed result after it leaves the feed", async () => {
+  const savedUrl = "https://web.facebook.com/ledcm2/posts/historical";
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "led-facebook-index-test-"),
+  );
+  let index = {
+    posts: [
+      {
+        url: savedUrl,
+        publishedOn: "2020-10-29",
+        expectedPhotos: 20,
+        text: "ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 29 ตุลาคม 2563",
+      },
+    ],
+  };
+  const opened = [];
+  const source = createFacebookSource(directory, {
+    maxScrolls: 0,
+    postIndex: {
+      read: async () => index,
+      write: async (data) => {
+        index = data;
+      },
+    },
+    async launchBrowser() {
+      const browser = await chromium.launch({ headless: true });
+      return {
+        close: () => browser.close(),
+        async newContext(options) {
+          const context = await browser.newContext(options);
+          await context.route("https://web.facebook.com/**", async (route) => {
+            const url = route.request().url();
+            opened.push(url);
+            const body =
+              url === savedUrl
+                ? '<a href="https://web.facebook.com/photo/?fbid=11">รูปที่เปิดไม่ได้</a>'
+                : '<div>Monday 16 November 2020 at 09:00 <a href="https://web.facebook.com/ledcm2/posts/current">recent post</a></div>';
+            await route.fulfill({
+              contentType: "text/html; charset=utf-8",
+              body,
+            });
+          });
+          return context;
+        },
+      };
+    },
+  });
+  try {
+    const result = await source.search({
+      auctionDates: ["29/10/2563"],
+      caseNumber: "ทดสอบ",
+    });
+    assert.ok(opened.includes(savedUrl));
+    assert.equal(result.posts[0].url, savedUrl);
+    assert.equal(result.posts[0].match.kind, "result");
+    assert.equal(result.caseFilter.status, "incomplete");
+    assert.equal(
+      index.posts.find((post) => post.url === savedUrl).expectedPhotos,
+      20,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("public feed extraction keeps post text and observed photo links together", async () => {
   const browser = await chromium.launch({ headless: true });

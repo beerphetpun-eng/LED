@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   bangkokDay,
+  auctionISO,
   facebookPublishedDay,
   facebookPublicationRelevant,
   matchPost,
@@ -14,7 +15,8 @@ import { filterFacebookImages } from "./facebook-image-filter.mjs";
 
 const PAGE = "https://web.facebook.com/ledcm2";
 const postUrl =
-  /^https:\/\/(?:web\.|www\.)?facebook\.com\/ledcm2\/posts\/[A-Za-z0-9]+\/?$/;
+  /^https:\/\/(?:web\.|www\.)?facebook\.com\/ledcm2\/posts\/(?:[A-Za-z0-9]+|[\p{L}\p{N}%._-]+\/\d+)\/?$/u;
+const truncatedCaption = /(?:…|\.\.\.)\s*(?:See more|ดูเพิ่มเติม)/i;
 
 async function dismiss(page) {
   const close = page.getByRole("button", { name: /^(Close|ปิด)$/ }).last();
@@ -165,8 +167,149 @@ export async function readFacebookPermalink(page, url) {
     )
   );
 }
-export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
+
+function rememberPosts(found, posts) {
+  for (const post of posts) {
+    if (!postUrl.test(post.url)) continue;
+    if (post.text || !found.get(post.url)?.text) found.set(post.url, post);
+  }
+}
+
+async function collectPublicPosts(page, found, maxScrolls, stableLimit = 5) {
+  let unchanged = 0;
+  let limited = false;
+  for (let scroll = 0; scroll <= maxScrolls; scroll++) {
+    const before = found.size;
+    rememberPosts(found, await readFacebookPosts(page, true));
+    const gate = page
+      .getByRole("dialog")
+      .filter({
+        hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
+      })
+      .first();
+    if (await gate.isVisible()) limited = true;
+    unchanged = before === found.size ? unchanged + 1 : 0;
+    if ((scroll >= 3 && unchanged >= stableLimit) || scroll === maxScrolls)
+      break;
+    await page.mouse.move(700, 840);
+    await page.mouse.wheel(0, 1800);
+    await page.waitForTimeout(1000);
+    await dismiss(page);
+  }
+  return limited;
+}
+
+export function nextFacebookArchiveLink(posts, auctionDates, checked) {
+  const days = auctionDates.map(Date.parse);
+  const distance = (day) =>
+    Math.min(...days.map((date) => Math.abs(date - Date.parse(day))));
+  return [...posts]
+    .filter((p) => postUrl.test(p.url) && !checked.has(p.url) && p.publishedOn)
+    .sort((a, b) => distance(a.publishedOn) - distance(b.publishedOn))[0]?.url;
+}
+
+export function createFacebookSource(
+  evidencePath,
+  {
+    maxScrolls = 20,
+    postIndex,
+    launchBrowser = () => chromium.launch({ headless: true }),
+  } = {},
+) {
   let busy = false;
+  let indexTask, indexTimer, indexBrowser;
+  const feedOptions = {
+    locale: "en-US",
+    timezoneId: "Asia/Bangkok",
+    viewport: { width: 1440, height: 1100 },
+    acceptDownloads: false,
+  };
+  async function savePostIndex(index, posts) {
+    if (!postIndex) return;
+    const entries = new Map(index.posts.map((p) => [p.url, p]));
+    for (const { url, publishedOn, text, expectedPhotos } of posts) {
+      if (!publishedOn || !postUrl.test(url)) continue;
+      const caption = truncatedCaption.test(text) ? "" : text;
+      const previous = entries.get(url);
+      entries.set(url, {
+        url,
+        publishedOn,
+        text: caption || previous?.text || "",
+        expectedPhotos: expectedPhotos || previous?.expectedPhotos,
+      });
+    }
+    await postIndex.write({
+      checkedAt: index.checkedAt,
+      posts: [...entries.values()],
+    });
+  }
+
+  async function indexFeed() {
+    const index = await postIndex.read();
+    if (Date.now() - Date.parse(index.checkedAt) < 6 * 3600000) return;
+    const found = new Map();
+    indexBrowser = await launchBrowser();
+    try {
+      const page = await indexBrowser.newPage(feedOptions);
+      await page.goto(PAGE, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await dismiss(page);
+      await collectPublicPosts(page, found, 8);
+      const alreadyRead = new Set(
+        index.posts.filter((post) => post.text).map((post) => post.url),
+      );
+      const previews = [...found.values()]
+        .filter(
+          (post) =>
+            truncatedCaption.test(post.text) && !alreadyRead.has(post.url),
+        )
+        .slice(0, 4);
+      for (const preview of previews) {
+        try {
+          await page.goto(preview.url, {
+            waitUntil: "domcontentloaded",
+            timeout: 12000,
+          });
+          const post = await readFacebookPermalink(page, preview.url);
+          if (post)
+            found.set(preview.url, {
+              ...post,
+              url: preview.url,
+              publishedOn: post.publishedOn || preview.publishedOn,
+            });
+        } catch {
+          /* Keep the observed public link for the next search. */
+        }
+      }
+      await savePostIndex(
+        { ...index, checkedAt: new Date().toISOString() },
+        found.values(),
+      );
+    } finally {
+      await indexBrowser.close();
+      indexBrowser = undefined;
+    }
+  }
+
+  function scheduleIndex() {
+    if (!postIndex || indexTimer) return;
+    indexTimer = setInterval(() => {
+      if (busy || indexTask) return;
+      indexTask = indexFeed()
+        .catch((error) =>
+          console.warn("Facebook index:", error.message.split("\n")[0]),
+        )
+        .finally(() => {
+          indexTask = undefined;
+        });
+    }, 15 * 60000);
+    indexTimer.unref();
+  }
+
+  async function stopIndex() {
+    clearInterval(indexTimer);
+    await indexBrowser?.close().catch(() => {});
+    await indexTask;
+  }
   async function search(property, { postUrls = [] } = {}) {
     const requestedPosts = new Set(postUrls);
     if (postUrls.some((url) => !postUrl.test(url)))
@@ -179,21 +322,16 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
     let browser, staging;
     const runId = randomUUID();
     try {
+      await indexTask;
+      const index = postIndex ? await postIndex.read() : { posts: [] };
       staging = await mkdtemp(path.join(tmpdir(), "land-radar-facebook-"));
-      browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext({
-        locale: "en-US",
-        timezoneId: "Asia/Bangkok",
-        viewport: { width: 1440, height: 1100 },
-        acceptDownloads: false,
-      });
+      browser = await launchBrowser();
+      const context = await browser.newContext(feedOptions);
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
       const found = new Map();
       const warnings = [];
       let loginRequired = false;
-      let unchanged = requestedPosts.size ? 5 : 0;
-      let feedLimited = false;
       try {
         if (!requestedPosts.size) {
           await page.goto(PAGE, {
@@ -205,47 +343,72 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
             .locator('a[href*="/ledcm2/posts/"]')
             .first()
             .waitFor({ timeout: 25000 });
+          if (await collectPublicPosts(page, found, maxScrolls))
+            warnings.push(
+              "Facebook จำกัดการเลื่อนฟีดสาธารณะ ระบบจะตรวจลิงก์โพสต์อื่นที่เปิดได้เพิ่มเติม",
+            );
         }
       } catch {
-        unchanged = 5;
         warnings.push(
           "Facebook ไม่แสดงโพสต์ในฟีด จะลองเปิดโพสต์ที่บันทึกไว้โดยตรง",
         );
       }
-      for (let scroll = 0; scroll < maxScrolls && unchanged < 5; scroll++) {
-        const posts = await readFacebookPosts(page, true);
-        const before = found.size;
-        for (const p of posts) {
-          if (p.text || !found.get(p.url)?.text) found.set(p.url, p);
-        }
-        const gate = page
-          .getByRole("dialog")
-          .filter({
-            hasText: /See more on Facebook|Log in to Facebook|เข้าสู่ระบบ/,
-          })
-          .first();
-        if (await gate.isVisible()) feedLimited = true;
-        unchanged = before === found.size ? unchanged + 1 : 0;
-        if (unchanged >= 5) break;
-        await page.mouse.move(700, 840);
-        await page.mouse.wheel(0, 1800);
-        await page.waitForTimeout(1200);
-        await dismiss(page);
-      }
-      if (feedLimited)
-        warnings.push(
-          "Facebook จำกัดการเลื่อนฟีดสาธารณะ จึงตรวจได้เฉพาะโพสต์ที่หน้าเว็บแสดง",
-        );
       const previousPosts = new Map(
         [
           ...(property.facebook?.albumCoverage || []),
           ...(property.facebook?.posts || []),
         ].map((post) => [post.url, post]),
       );
+      if (!requestedPosts.size) {
+        const archive = new Map(index.posts.map((p) => [p.url, p]));
+        rememberPosts(archive, previousPosts.values());
+        rememberPosts(archive, found.values());
+        const checked = new Set();
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const foundDates = new Set(
+            selectFacebookPosts(
+              [...found.values()],
+              property.auctionDates,
+              today,
+            ).map((p) => p.match.date),
+          );
+          const pastDates = property.auctionDates
+            .map(auctionISO)
+            .filter((date) => date && date < today && !foundDates.has(date));
+          if (!pastDates.length) break;
+          const link = nextFacebookArchiveLink(
+            archive.values(),
+            pastDates,
+            checked,
+          );
+          if (!link) break;
+          checked.add(link);
+          try {
+            await page.goto(link, {
+              waitUntil: "domcontentloaded",
+              timeout: 12000,
+            });
+            await dismiss(page);
+            await collectPublicPosts(page, found, 6, 2);
+            rememberPosts(archive, found.values());
+          } catch {
+            /* Other public post pages may still be reachable. */
+          }
+        }
+      }
       const knownUrls = requestedPosts.size
         ? requestedPosts
         : new Set([
             ...previousPosts.keys(),
+            ...index.posts
+              .filter((p) =>
+                facebookPublicationRelevant(
+                  p.publishedOn,
+                  property.auctionDates,
+                  today,
+                ),
+              )
+              .map((p) => p.url),
             ...[...found.values()]
               .filter((p) =>
                 facebookPublicationRelevant(
@@ -303,11 +466,23 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
             expectedPhotos: 0,
           });
       }
+      if (!requestedPosts.size) {
+        for (const saved of index.posts) {
+          const current = found.get(saved.url);
+          if (
+            postUrl.test(saved.url) &&
+            !current?.text &&
+            matchPost(saved, property.auctionDates, today)
+          )
+            found.set(saved.url, { ...saved, photoUrls: [] });
+        }
+      }
       const candidates = selectFacebookPosts(
         [...found.values()],
         property.auctionDates,
         today,
       );
+      await savePostIndex(index, found.values());
       const posts = [];
       for (const candidate of candidates) {
         const previousPost = previousPosts.get(candidate.url);
@@ -534,5 +709,5 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       }
     }
   }
-  return { search };
+  return { search, scheduleIndex, stopIndex };
 }
