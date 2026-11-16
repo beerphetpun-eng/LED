@@ -112,8 +112,8 @@ export function PropertyDetails({
   }
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const auctionDays = p.auctionDates.map(auctionDay);
-  const facebookPosts = p.facebook?.posts ?? [];
   const facebookFilter = p.facebook?.caseFilter;
+  const facebookPosts = facebookFilter ? (p.facebook?.posts ?? []) : [];
   const next = auctionDays.filter((d) => d >= today()).sort()[0];
   return (
     <aside className="details" aria-label="รายละเอียดทรัพย์">
@@ -531,9 +531,11 @@ export function PropertyDetails({
                   คลังกลางอัปเดตเมื่อ {time(p.facebook.checkedAt)}
                 </p>
               )}
-              {!facebookFilter && !facebookPosts.length && (
+              {!facebookFilter && (
                 <p className="muted">
-                  คลังกลางยังไม่มีอัลบั้มที่ตรงกับวันประมูลของทรัพย์นี้
+                  {p.facebook?.posts?.length
+                    ? "รอผลคัดเลขคดีจากคลังกลาง"
+                    : "คลังกลางยังไม่มีอัลบั้มที่ตรงกับวันประมูลของทรัพย์นี้"}
                 </p>
               )}
               {facebookFilter && (

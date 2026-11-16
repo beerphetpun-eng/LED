@@ -97,6 +97,7 @@ export function createFacebookCaseIndex({
     const incomplete = albums.filter(
       (album) =>
         !Number.isSafeInteger(album.expectedPhotos) ||
+        album.expectedPhotos <= 0 ||
         album.images.length < album.expectedPhotos,
     ).length;
     const counts = {
