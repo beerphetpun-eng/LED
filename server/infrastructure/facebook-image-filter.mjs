@@ -3,15 +3,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { findFacebookCaseBoxes } from "../domain/facebook-case.mjs";
 
-async function recognizeCases(caseNumber, files) {
+export async function recognizeFacebookCases(files, signal) {
   const langPath = await mkdtemp(path.join(tmpdir(), "land-radar-ocr-"));
   try {
     return await new Promise((resolve, reject) => {
       const child = execFile(
         process.execPath,
         [fileURLToPath(new URL("./facebook-ocr-worker.mjs", import.meta.url))],
-        { timeout: 600_000, windowsHide: true },
+        {
+          timeout: 600_000,
+          maxBuffer: 4 * 1024 * 1024,
+          windowsHide: true,
+          signal,
+        },
         (error, stdout) => {
           if (error) return reject(error);
           try {
@@ -22,11 +28,17 @@ async function recognizeCases(caseNumber, files) {
         },
       );
       child.stdin.on("error", reject);
-      child.stdin.end(JSON.stringify({ caseNumber, files, langPath }));
+      child.stdin.end(JSON.stringify({ files, langPath }));
     });
   } finally {
     await rm(langPath, { recursive: true, force: true });
   }
+}
+
+async function recognizeCases(caseNumber, files) {
+  return (await recognizeFacebookCases(files)).map((index) =>
+    index ? findFacebookCaseBoxes(index, caseNumber) : null,
+  );
 }
 
 export async function filterFacebookImages(

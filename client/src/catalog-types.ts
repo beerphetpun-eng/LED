@@ -25,6 +25,20 @@ export type CaseBox = {
 };
 export type FacebookResult = {
   checkedAt?: string;
+  caseFilter?: {
+    status:
+      | "scanning"
+      | "matched"
+      | "no_match"
+      | "incomplete"
+      | "unreadable"
+      | "no_case";
+    checked: number;
+    total: number;
+    matched: number;
+    unreadable: number;
+    incomplete: number;
+  };
   posts: {
     url: string;
     text: string;
@@ -34,6 +48,7 @@ export type FacebookResult = {
       url: string;
       sourceUrl: string;
       photoId: string;
+      caseBoxes?: CaseBox[];
     }[];
     expectedPhotos?: number | null;
     downloadedPhotos?: number;

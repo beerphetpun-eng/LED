@@ -13,6 +13,7 @@ import { createCatalogHttp } from "./presentation/catalog-http.mjs";
 import { createEvidenceStore } from "./infrastructure/evidence-store.mjs";
 import { loadGeography } from "./infrastructure/geography-source.mjs";
 import { createFacebookSource } from "./infrastructure/facebook-source.mjs";
+import { createFacebookCaseIndex } from "./infrastructure/facebook-case-index.mjs";
 await db.init();
 await mkdir(evidencePath, { recursive: true });
 const browser = new BrowserService();
@@ -25,7 +26,13 @@ const sync = createSyncService({
   geography,
 });
 await sync.init();
+const facebookCases = createFacebookCaseIndex({
+  evidencePath,
+  read: (url) => db.getState("facebook_cases_v1:" + url),
+  write: (url, index) => db.setState("facebook_cases_v1:" + url, index),
+});
 const facebook = createFacebookSource(evidencePath, {
+  caseIndex: facebookCases,
   postIndex: {
     read: () => db.getState("facebook_public_posts", { posts: [] }),
     write: (data) => db.setState("facebook_public_posts", data),
@@ -68,7 +75,12 @@ async function stop() {
   if (stopping) return;
   stopping = true;
   server.close();
-  await Promise.all([sync.stop(), browser.close(), facebook.stopIndex()]);
+  await Promise.all([
+    sync.stop(),
+    browser.close(),
+    facebook.stopIndex(),
+    facebookCases.stop(),
+  ]);
   await db.close();
   process.exit();
 }
