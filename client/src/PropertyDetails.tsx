@@ -102,15 +102,8 @@ export function PropertyDetails({
   }
   const estimate = mapParcels(p).length ? null : approximateLocation(p);
   const auctionDays = p.auctionDates.map(auctionDay);
-  const facebookPosts =
-    p.facebook?.posts.filter((post) => auctionDays.includes(post.match.date)) ??
-    [];
-  const caseFilter =
-    p.facebook &&
-    !p.facebook.nearbyDays &&
-    facebookPosts.length === p.facebook.posts.length
-      ? p.facebook.caseFilter
-      : undefined;
+  const facebookPosts = p.facebook?.posts ?? [];
+  const caseFilter = p.facebook?.caseFilter;
   const incompleteFacebookPosts =
     caseFilter?.incompletePosts ??
     facebookPosts.filter(
@@ -481,7 +474,7 @@ export function PropertyDetails({
             <section className="facebook">
               <h3>ประกาศและผลการขายจาก Facebook</h3>
               <p className="muted small">
-                ดึงรูปจากโพสต์สาธารณะที่ข้อความระบุวันประมูลตรงกับทรัพย์นี้
+                นัดที่ผ่านแล้วแสดงผลขาย นัดล่วงหน้าแสดงประกาศก่อนประมูล
               </p>
               <details>
                 <summary>ระบุลิงก์เพื่อดึงเฉพาะโพสต์นั้น</summary>
@@ -547,15 +540,18 @@ export function PropertyDetails({
                     </p>
                   )}
                   {!facebookPosts.length && (
-                    <p>
-                      ไม่พบโพสต์ที่ระบุวันประมูลตรงกับทรัพย์นี้ในโพสต์ที่ตรวจได้
-                    </p>
+                    <p>ยังไม่มีโพสต์ที่เข้าเงื่อนไขวันประมูลและวันเผยแพร่</p>
                   )}
                   {facebookPosts.map((post) => (
                     <article className="facebook-post" key={post.url}>
                       <a href={post.url} target="_blank" rel="noreferrer">
-                        วันประมูล · {post.match.date} <ExternalLink size={13} />
+                        {post.match.kind === "result"
+                          ? "ผลประมูล"
+                          : "ประกาศก่อนประมูล"}
+                        {" · "}วันประมูล {post.match.date}{" "}
+                        <ExternalLink size={13} />
                       </a>
+                      <p className="small muted">เผยแพร่ {post.publishedOn}</p>
                       {post.expectedPhotos != null &&
                         post.downloadedPhotos != null && (
                           <p className="small muted">

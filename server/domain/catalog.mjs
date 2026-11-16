@@ -252,44 +252,111 @@ const thaiMonths = [
   "พฤศจิกายน",
   "ธันวาคม",
 ];
-export function postDates(text) {
-  const s = clean(text)
-    .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50))
-    .replace(/[\u200b-\u200f]/g, "");
-  const dates = [...s.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g)].map((m) => ({
-    date: auctionISO(m[0]),
-    index: m.index,
-  }));
-  for (const m of s.matchAll(
-    new RegExp(
-      `(\\d{1,2})\\s*(${thaiMonths.join("|")})\\s*(?:พ\\.?ศ\\.?\\s*)?(\\d{4})`,
-      "g",
-    ),
-  )) {
-    const date = auctionISO(`${m[1]}/${thaiMonths.indexOf(m[2]) + 1}/${m[3]}`);
-    dates.push({ date, index: m.index });
-  }
-  return [
-    ...new Set(
-      dates
-        .sort((a, b) => a.index - b.index)
-        .map(({ date }) => date)
-        .filter(Boolean),
-    ),
-  ];
-}
-export function matchPost(text, auctionDates) {
-  const content = clean(text).replace(/[\u200b-\u200f]/g, "");
-  const title = /ขาย\s*ทอดตลาด\s*ทรัพย์/.exec(content);
-  if (!title) return null;
-  const caption = content.slice(title.index + title[0].length);
-  const datedCaption = /(?:ประจำ\s*)?วัน\s*ที่\s*(?=[\d๐-๙])/.exec(caption);
-  const date = postDates(
-    datedCaption
-      ? caption.slice(datedCaption.index + datedCaption[0].length)
-      : caption,
-  )[0];
-  return date && auctionDates.some((auction) => auctionISO(auction) === date)
-    ? { date, auction: date, days: 0, kind: "exact_date" }
+const englishMonths = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const thaiPostDate = new RegExp(
+  `^(\\d{1,2})\\s*(${thaiMonths.join("|")})\\s*(?:พ\\.?ศ\\.?\\s*)?(\\d{4})(?!\\d)`,
+);
+const absolutePostTimestamp = new RegExp(
+  `\\b(\\d{1,2}) (${englishMonths.join("|")}) (\\d{4}) at \\d{1,2}:\\d{2}\\b`,
+);
+const auctionPostTitle =
+  /(ผล\s*(?:การ\s*)?|(?:บัญชี|ประกาศ)\s*(?:รายการ\s*|การ\s*)?)ขาย\s*ทอดตลาด\s*ทรัพย์(?:สิน)?/;
+const saleDatePrefix =
+  /^(?:[\s\p{P}\p{S}]+)?(?:(?:ประจำ\s*|ใน\s*)?วัน\s*(?:(?:จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์)\s*)?ที่\s*)?/u;
+
+export function facebookPublishedDay(label) {
+  const stamp = absolutePostTimestamp.exec(clean(label));
+  return stamp
+    ? auctionISO(
+        `${stamp[1]}/${englishMonths.indexOf(stamp[2]) + 1}/${stamp[3]}`,
+      )
     : null;
+}
+
+export function matchPost(
+  { text, publishedOn },
+  auctionDates,
+  today = bangkokDay(),
+) {
+  const content = clean(text)
+    .replace(/[\u200b-\u200f]/g, "")
+    .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50));
+  const title = auctionPostTitle.exec(content);
+  if (!title || !publishedOn || publishedOn > today) return null;
+
+  const caption = content
+    .slice(title.index + title[0].length)
+    .replace(saleDatePrefix, "");
+  const thai = thaiPostDate.exec(caption);
+  const date = auctionISO(
+    thai
+      ? `${thai[1]}/${thaiMonths.indexOf(thai[2]) + 1}/${thai[3]}`
+      : /^\d{1,2}\/\d{1,2}\/\d{4}\b/.exec(caption)?.[0],
+  );
+  if (!date || !auctionDates.some((auction) => auctionISO(auction) === date))
+    return null;
+
+  const kind = title[1].startsWith("ผล") ? "result" : "announcement";
+  const offset = (Date.parse(publishedOn) - Date.parse(date)) / 86400000;
+  const eligible =
+    kind === "result"
+      ? date <= today && offset >= 0 && offset <= 3
+      : date >= today && offset >= -3 && offset <= 0;
+  return eligible ? { date, auction: date, kind } : null;
+}
+
+export function selectFacebookPosts(posts, auctionDates, today = bangkokDay()) {
+  const matched = posts.flatMap((post) => {
+    const match = matchPost(post, auctionDates, today);
+    return match ? [{ ...post, match }] : [];
+  });
+  const hasResultToday = matched.some(
+    ({ match }) => match.date === today && match.kind === "result",
+  );
+  return hasResultToday
+    ? matched.filter(
+        ({ match }) => match.date !== today || match.kind === "result",
+      )
+    : matched;
+}
+
+export function facebookForDisplay(
+  facebook,
+  auctionDates,
+  today = bangkokDay(),
+) {
+  if (!facebook?.posts) return facebook;
+  const previousCoverage = facebook.albumCoverage || facebook.posts;
+  const albumCoverage = selectFacebookPosts(
+    previousCoverage,
+    auctionDates,
+    today,
+  );
+  const eligible = new Map(albumCoverage.map(({ url, match }) => [url, match]));
+  const posts = facebook.posts.flatMap((post) => {
+    const match = eligible.get(post.url);
+    return match ? [{ ...post, match }] : [];
+  });
+  return {
+    ...facebook,
+    albumCoverage,
+    posts,
+    caseFilter:
+      albumCoverage.length === previousCoverage.length
+        ? facebook.caseFilter
+        : undefined,
+  };
 }

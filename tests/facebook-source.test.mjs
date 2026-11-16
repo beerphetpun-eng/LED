@@ -12,7 +12,7 @@ test("public feed extraction keeps post text and observed photo links together",
   try {
     const page = await browser.newPage();
     await page.setContent(`<main>
-   <article><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">today</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><p data-ad-comet-preview="message">ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
+   <article><div><div>Wednesday 11 November 2026 at 17:47</div><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">1d</a></div><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><p data-ad-comet-preview="message">ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
    <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a><a href="https://web.facebook.com/photo/?fbid=457&set=pcb.2" aria-label="15 remaining items">more</a><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2&ref=extra">duplicate</a></article>
    <article><a href="https://web.facebook.com/ledcm2/posts/other">other</a><p>กิจกรรมสำนักงาน</p><a href="https://web.facebook.com/photo?fbid=789">photo</a></article>
   </main>`);
@@ -20,6 +20,7 @@ test("public feed extraction keeps post text and observed photo links together",
     assert.equal(posts.length, 2);
     assert.equal(posts[0].url, "https://web.facebook.com/ledcm2/posts/one");
     assert.match(posts[0].text, /12 พฤศจิกายน/);
+    assert.equal(posts[0].publishedOn, "2026-11-11");
     assert.doesNotMatch(posts[0].text, /5 พฤศจิกายน/);
     assert.equal(posts[0].photoUrls.length, 1);
     assert.match(posts[0].photoUrls[0], /fbid=123/);

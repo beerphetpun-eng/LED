@@ -3,7 +3,12 @@ import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { matchPost } from "../domain/catalog.mjs";
+import {
+  bangkokDay,
+  facebookPublishedDay,
+  matchPost,
+  selectFacebookPosts,
+} from "../domain/catalog.mjs";
 import { filterFacebookImages } from "./facebook-image-filter.mjs";
 
 const PAGE = "https://web.facebook.com/ledcm2";
@@ -60,7 +65,7 @@ export async function navigateFacebookPhoto(page, current, direction = "next") {
 }
 
 export async function readFacebookPosts(page) {
-  return await page
+  const posts = await page
     .locator('a[href*="/ledcm2/posts/"]')
     .evaluateAll((links) => {
       const result = [];
@@ -115,6 +120,7 @@ export async function readFacebookPosts(page) {
             result.push({
               url: link.href.split("?")[0],
               text,
+              publicationLabel: link.title + " " + link.parentElement.innerText,
               photoUrls,
               albumStart: more?.href,
               expectedPhotos: photoUrls.length + (more ? extraPhotos(more) : 0),
@@ -125,6 +131,10 @@ export async function readFacebookPosts(page) {
       }
       return result;
     });
+  return posts.map(({ publicationLabel, ...post }) => ({
+    ...post,
+    publishedOn: facebookPublishedDay(publicationLabel),
+  }));
 }
 
 export async function readFacebookPermalink(page, url) {
@@ -157,6 +167,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
     if (busy) throw Error("กำลังอ่าน Facebook กรุณารอให้รอบก่อนเสร็จ");
     if (!property.auctionDates?.length)
       throw Error("ทรัพย์นี้ไม่มีวันประมูลสำหรับจับคู่โพสต์");
+    const today = bangkokDay();
     busy = true;
     let browser, staging;
     const runId = randomUUID();
@@ -165,6 +176,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       browser = await chromium.launch({ headless: true });
       const context = await browser.newContext({
         locale: "en-US",
+        timezoneId: "Asia/Bangkok",
         viewport: { width: 1440, height: 1100 },
         acceptDownloads: false,
       });
@@ -221,7 +233,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       for (const url of knownUrls) {
         if (!postUrl.test(url)) continue;
         const fromFeed = found.get(url);
-        if (fromFeed && matchPost(fromFeed.text, property.auctionDates))
+        if (fromFeed && matchPost(fromFeed, property.auctionDates, today))
           continue;
         try {
           await page.goto(url, {
@@ -243,9 +255,9 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
       }
       for (const url of requestedPosts) {
         const post = found.get(url);
-        if (post && !matchPost(post.text, property.auctionDates))
+        if (post && !matchPost(post, property.auctionDates, today))
           warnings.push(
-            "วันที่ในข้อความของโพสต์ที่ระบุไม่ตรงกับวันประมูลของทรัพย์",
+            "โพสต์ที่ระบุไม่เข้าเงื่อนไขวันประมูล ประเภทโพสต์ หรือวันเผยแพร่ภายใน 3 วัน",
           );
       }
       for (const [url, prior] of previousPosts) {
@@ -257,16 +269,16 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
           found.set(url, {
             url,
             text: prior.text,
+            publishedOn: prior.publishedOn,
             photoUrls: [],
             expectedPhotos: 0,
           });
       }
-      const candidates = [...found.values()]
-        .map((p) => ({
-          ...p,
-          match: matchPost(p.text, property.auctionDates),
-        }))
-        .filter((p) => p.match);
+      const candidates = selectFacebookPosts(
+        [...found.values()],
+        property.auctionDates,
+        today,
+      );
       const posts = [];
       for (const candidate of candidates) {
         const previousPost = previousPosts.get(candidate.url);
@@ -443,6 +455,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
         posts.push({
           url: candidate.url,
           text: candidate.text,
+          publishedOn: candidate.publishedOn,
           match: candidate.match,
           images,
           rowMatched: images.some((image) => image.caseBoxes?.length),
@@ -475,7 +488,7 @@ export function createFacebookSource(evidencePath, { maxScrolls = 20 } = {}) {
         albumCoverage: posts.map(({ images, rowMatched, ...album }) => album),
         warnings,
         scannedPosts: found.size,
-        note: "ตรวจวันประมูลในข้อความของโพสต์สาธารณะ",
+        note: "ตรวจวันประมูลและวันเผยแพร่ของโพสต์สาธารณะ",
       };
     } catch (e) {
       throw Error(
