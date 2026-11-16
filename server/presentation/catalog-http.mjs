@@ -44,6 +44,7 @@ export function createCatalogHttp({
       facebookAlbumCoverage: true,
       facebookPublicExactDates: true,
       facebookAuctionSchedule: true,
+      deedRefresh: true,
     };
     try {
       await db.health();
@@ -105,9 +106,14 @@ export function createCatalogHttp({
   app.patch("/api/properties/:propertyId/user", async (req, res) =>
     res.json(await db.updateUser(req.params.propertyId, req.body)),
   );
-  app.post("/api/properties/:propertyId/photos/refresh", async (req, res) =>
-    res.json(await sync.refreshPhotos(req.params.propertyId)),
-  );
+  app.post("/api/properties/:propertyId/photos/refresh", async (req, res) => {
+    const result = await sync.refreshPhotos(req.params.propertyId);
+    res.json({ ...result, property: propertyDetails(result.property) });
+  });
+  app.post("/api/properties/:propertyId/deeds/refresh", async (req, res) => {
+    const result = await sync.refreshDeeds(req.params.propertyId);
+    res.json({ ...result, property: propertyDetails(result.property) });
+  });
   app.post("/api/properties/:propertyId/facebook", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     if (!p) throw Error("ไม่พบทรัพย์");

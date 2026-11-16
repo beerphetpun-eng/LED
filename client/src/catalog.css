@@ -1248,6 +1248,19 @@ footer {
     opacity: 0.35;
   }
 }
+.action-spinner {
+  animation: action-spin 0.8s linear infinite;
+}
+@keyframes action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .action-spinner {
+    animation: none;
+  }
+}
 @media (min-width: 1600px) {
   .results {
     padding-inline: 32px;

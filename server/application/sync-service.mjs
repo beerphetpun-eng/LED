@@ -15,6 +15,8 @@ const verified = (p) =>
   p?.status === "located" &&
   Number.isFinite(p.latitude) &&
   Number.isFinite(p.longitude);
+const completeParcel = (p) =>
+  verified(p) && p.mapEvidenceUrl && p.backgroundReady !== false;
 
 export function createSyncService({
   repository: db,
@@ -31,7 +33,7 @@ export function createSyncService({
     stopping = false,
     ticking = false,
     savingSettings = false,
-    photoRefresh = null;
+    manualRefresh = null;
   const persist = async (patch) => {
     state = { ...state, ...patch, updatedAt: clock().toISOString() };
     await db.setState("sync_runtime", state);
@@ -77,21 +79,19 @@ export function createSyncService({
       skippedExisting: (state.baseExisting || 0) + (job.skippedExisting || 0),
     });
   }
-  async function lookup(signal, automatic) {
-    const all = await db.allProperties();
+  async function lookup(signal, automatic, property = null) {
+    const all = property ? [property] : await db.allProperties();
+    const runId = property ? randomUUID() : state.runId;
+    let confirmed = 0;
     const day = bangkokDay(clock());
     const lastLookup = (p, deed) =>
       p.parcels?.find((v) => v.deed === deed)?.lookupDay || "";
     const cache = new Map();
     const cacheKey = (p, deed) =>
       JSON.stringify([p.province, p.district, p.subdistrict, deed]);
-    for (const p of all)
+    for (const p of property ? [] : all)
       for (const parcel of p.parcels || []) {
-        if (
-          verified(parcel) &&
-          parcel.mapEvidenceUrl &&
-          parcel.backgroundReady !== false
-        ) {
+        if (completeParcel(parcel)) {
           const c =
             p.assetComponents?.find((c) =>
               c.deed?.split(", ").includes(parcel.deed),
@@ -103,7 +103,10 @@ export function createSyncService({
       .filter((p) => p.deed && p.status !== "failed")
       .map((p) => ({
         p,
-        deeds: missingParcelDeeds(p)
+        deeds: (property
+          ? [...new Set(p.deed.split(", ").filter(Boolean))]
+          : missingParcelDeeds(p)
+        )
           .filter((deed) => !automatic || lastLookup(p, deed) !== day)
           .sort((a, b) => lastLookup(p, a).localeCompare(lastLookup(p, b))),
       }))
@@ -114,12 +117,13 @@ export function createSyncService({
     for (let index = 0; index < records.length; index++) {
       signal.throwIfAborted();
       const { p, deeds } = records[index];
-      await persist({
-        status: "geocoding",
-        message: `ค้นหาพิกัด ${index + 1}/${records.length} · โฉนด ${p.deed}`,
-        geoDone: index,
-        geoTotal: records.length,
-      });
+      if (!property)
+        await persist({
+          status: "geocoding",
+          message: `ค้นหาพิกัด ${index + 1}/${records.length} · โฉนด ${p.deed}`,
+          geoDone: index,
+          geoTotal: records.length,
+        });
       let parcels = p.parcels || [];
       for (const deed of deeds) {
         signal.throwIfAborted();
@@ -135,14 +139,9 @@ export function createSyncService({
           parcel = cache.get(key);
           if (!parcel) {
             attempts++;
-            parcel = await geocoder.locate(record, deed, state.runId, signal);
+            parcel = await geocoder.locate(record, deed, runId, signal);
           }
-          if (
-            verified(parcel) &&
-            parcel.mapEvidenceUrl &&
-            parcel.backgroundReady !== false
-          )
-            cache.set(key, parcel);
+          if (completeParcel(parcel)) cache.set(key, parcel);
         } catch (e) {
           if (e instanceof SourceUnavailableError) throw e;
           signal.throwIfAborted();
@@ -156,10 +155,8 @@ export function createSyncService({
         }
         signal.throwIfAborted();
         const prefix = `โฉนด ${deed} ${p.district}: `;
-        const ready =
-          verified(parcel) &&
-          parcel.mapEvidenceUrl &&
-          parcel.backgroundReady !== false;
+        const ready = completeParcel(parcel);
+        if (ready) confirmed++;
         await db.recordCheck({
           key: `lands:${p.id}:${deed}`,
           message: ready
@@ -170,7 +167,8 @@ export function createSyncService({
           legacyPrefix: prefix,
         });
         const saved =
-          verified(previous) && !verified(parcel)
+          verified(previous) &&
+          (!verified(parcel) || (completeParcel(previous) && !ready))
             ? {
                 ...previous,
                 lookupWarning: parcel.note || "ค้นพิกัดซ้ำไม่สำเร็จ",
@@ -188,7 +186,31 @@ export function createSyncService({
         });
       }
     }
-    await persist({ geoDone: records.length });
+    if (!property) await persist({ geoDone: records.length });
+    return { confirmed, requested: records[0]?.deeds.length ?? 0 };
+  }
+
+  async function refreshManually(work) {
+    if (stopping || running || savingSettings || ticking || manualRefresh)
+      throw Error("มีงานซิงค์หรือรีเฟรชกำลังทำงานอยู่ กรุณารอให้งานเสร็จ");
+    const abort = new AbortController();
+    const task = work(abort.signal);
+    manualRefresh = { task, cancel: () => abort.abort() };
+    try {
+      return await task;
+    } finally {
+      manualRefresh = null;
+    }
+  }
+
+  function quotaPause(error) {
+    return {
+      lastQuotaAt: clock().toISOString(),
+      quotaMessage: error.message.split("\n")[0],
+      geoRetryAt: new Date(
+        clock().getTime() + (error.retryAfterMs || 302 * 60000),
+      ).toISOString(),
+    };
   }
   async function run(scopes, geoOnly, automatic, duplicatePolicy) {
     const signal = controller.signal;
@@ -270,13 +292,8 @@ export function createSyncService({
       if (!cancelled && !limited) await db.alert(e.message.split("\n")[0]);
       await persist({
         status: cancelled ? "cancelled" : limited ? "waiting_limit" : "partial",
-        ...(limited
-          ? {
-              lastQuotaAt: clock().toISOString(),
-              quotaMessage: e.message.split("\n")[0],
-            }
-          : {}),
-        ...(limited || (!cancelled && lookedUp && state.geoRetryAt)
+        ...(limited ? quotaPause(e) : {}),
+        ...(!limited && !cancelled && lookedUp && state.geoRetryAt
           ? {
               geoRetryAt: new Date(
                 clock().getTime() + (e.retryAfterMs || 302 * 60000),
@@ -317,132 +334,146 @@ export function createSyncService({
       return running;
     },
     status: () => ({ ...state, running }),
+    async refreshDeeds(id) {
+      return refreshManually(async (signal) => {
+        if (
+          state.geoRetryAt &&
+          Date.parse(state.geoRetryAt) > clock().getTime()
+        )
+          throw Error(
+            "LandsMaps ยังอยู่ในช่วงรอโควตา ดูเวลาลองใหม่ในตั้งค่าซิงค์",
+          );
+        const property = await db.getProperty(id);
+        if (!property) throw Error("ไม่พบทรัพย์นี้ในคลัง");
+        if (!property.deed || property.status === "failed")
+          throw Error("ทรัพย์นี้ไม่มีเลขโฉนดที่ค้นใน LandsMaps ได้");
+        try {
+          const result = await lookup(signal, false, property);
+          return { ...result, property: await db.getProperty(id) };
+        } catch (error) {
+          if (error instanceof SourceRateLimitError)
+            await persist({
+              status: "waiting_limit",
+              message: error.message.split("\n")[0],
+              ...quotaPause(error),
+            });
+          throw error;
+        }
+      });
+    },
     async refreshPhotos(id) {
-      if (stopping || running || savingSettings || photoRefresh)
-        throw Error(
-          "มีงานซิงค์หรือรีเฟรชรูปอยู่ กรุณาลองอีกครั้งเมื่องานเสร็จ",
+      return refreshManually(async (signal) => {
+        const property = await db.getProperty(id);
+        if (!property) throw Error("ไม่พบทรัพย์นี้ในคลัง");
+        const province = geography.provinces.find(
+          (p) => clean(p.name) === clean(property.province),
         );
-      const signal = new AbortController();
-      photoRefresh = {
-        cancel: () => signal.abort(),
-        task: (async () => {
-          const property = await db.getProperty(id);
-          if (!property) throw Error("ไม่พบทรัพย์นี้ในคลัง");
-          const province = geography.provinces.find(
-            (p) => clean(p.name) === clean(property.province),
+        const area = province?.districts.find(
+          (d) => district(d.name) === district(property.district),
+        );
+        if (!area) throw Error("ไม่พบอำเภอของทรัพย์ในรายการค้นหาต้นทาง");
+        const scope = {
+          provinceCode: province.code,
+          districtCode: area.code,
+        };
+        const components = property.assetComponents?.length
+          ? property.assetComponents
+          : [property];
+        const incomplete = components.filter(
+          (c) => c.evidenceReady !== true || !c.evidenceImages?.photos,
+        );
+        const targetKeys = new Set(
+          (incomplete.length ? incomplete : components).map(
+            (c) => c.componentKey || "primary",
+          ),
+        );
+        const job = {
+          id: randomUUID(),
+          targetId: id,
+          targetKeys,
+          values: {
+            provinces: scope.provinceCode,
+            amphurSelect: scope.districtCode,
+          },
+          pages: 0,
+          seen: 0,
+          skippedRed: 0,
+          excluded: 0,
+          properties: [],
+          warnings: [],
+          detailAttempts: new Map(),
+        };
+        await source.prepareScope(scope);
+        await source.extract(job, signal, async () => {});
+        signal.throwIfAborted();
+        const captures = job.properties.filter(
+          (p) => p.screenshotUrl && p.status !== "failed",
+        );
+        if (!captures.length)
+          throw Error(
+            "ดึงรูปใหม่ไม่ได้ อาจไม่พบประกาศในรายการขายปัจจุบันหรือเว็บต้นทางไม่ตอบสนอง",
           );
-          const area = province?.districts.find(
-            (d) => district(d.name) === district(property.district),
-          );
-          if (!area) throw Error("ไม่พบอำเภอของทรัพย์ในรายการค้นหาต้นทาง");
-          const scope = {
-            provinceCode: province.code,
-            districtCode: area.code,
-          };
-          const components = property.assetComponents?.length
-            ? property.assetComponents
-            : [property];
-          const incomplete = components.filter(
-            (c) => c.evidenceReady !== true || !c.evidenceImages?.photos,
-          );
-          const targetKeys = new Set(
-            (incomplete.length ? incomplete : components).map(
-              (c) => c.componentKey || "primary",
-            ),
-          );
-          const job = {
-            id: randomUUID(),
-            targetId: id,
-            targetKeys,
-            values: {
-              provinces: scope.provinceCode,
-              amphurSelect: scope.districtCode,
-            },
-            pages: 0,
-            seen: 0,
-            skippedRed: 0,
-            excluded: 0,
-            properties: [],
-            warnings: [],
-            detailAttempts: new Map(),
-          };
-          await source.prepareScope(scope);
-          await source.extract(job, signal.signal, async () => {});
-          signal.signal.throwIfAborted();
-          const captures = job.properties.filter(
-            (p) => p.screenshotUrl && p.status !== "failed",
-          );
-          if (!captures.length)
-            throw Error(
-              "ดึงรูปใหม่ไม่ได้ อาจไม่พบประกาศในรายการขายปัจจุบันหรือเว็บต้นทางไม่ตอบสนอง",
-            );
-          const changed = new Map(captures.map((p) => [p.componentKey, p]));
-          const updated = components.map((c) => {
-            const capture = changed.get(c.componentKey || "primary");
-            if (!capture) return c;
-            const {
-              screenshotUrl,
-              evidenceImages,
-              evidenceReady,
-              evidenceVersion,
-            } = capture;
-            return {
-              ...c,
-              screenshotUrl,
-              evidenceImages,
-              evidenceReady,
-              evidenceVersion,
-            };
-          });
-          const { screenshotUrl, evidenceImages, evidenceVersion } = updated[0];
-          const ready = updated.filter((c) => c.evidenceReady === true).length;
-          // Retain warnings unrelated to the photo capture.
-          const otherWarnings = (property.error || "")
-            .split(" · ")
-            .filter(
-              (part) =>
-                part &&
-                !/^(ภาพประกาศยังโหลดไม่ครบ|รูปถ่ายทรัพย์จากต้นทางยังตรวจได้ไม่ครบ)/.test(
-                  part,
-                ),
-            );
-          await db.updateSource(id, {
+        const changed = new Map(captures.map((p) => [p.componentKey, p]));
+        const updated = components.map((c) => {
+          const capture = changed.get(c.componentKey || "primary");
+          if (!capture) return c;
+          const {
             screenshotUrl,
             evidenceImages,
+            evidenceReady,
             evidenceVersion,
-            evidenceReady: ready === updated.length,
-            error: otherWarnings.join(" · ") || null,
-            ...(property.assetComponents?.length
-              ? { assetComponents: updated }
-              : {}),
-          });
-          for (const capture of captures) {
-            const prefix = `ทรัพย์ ${capture.assetSequence} คดี ${capture.caseNumber}: `;
-            await db.recordCheck({
-              key: `led:${id}::${capture.componentKey}`,
-              message: capture.evidenceReady
-                ? null
-                : prefix + (capture.error || "รูปประกาศยังโหลดไม่ครบ"),
-              retryable: !capture.evidenceReady,
-              attempts:
-                job.detailAttempts.get(`${id}::${capture.componentKey}`) || 0,
-              legacyPrefix: prefix,
-            });
-          }
+          } = capture;
           return {
-            property: await db.getProperty(id),
-            checked: captures.length,
-            requested: targetKeys.size,
-            complete:
-              ready === updated.length && captures.length === targetKeys.size,
+            ...c,
+            screenshotUrl,
+            evidenceImages,
+            evidenceReady,
+            evidenceVersion,
           };
-        })(),
-      };
-      try {
-        return await photoRefresh.task;
-      } finally {
-        photoRefresh = null;
-      }
+        });
+        const { screenshotUrl, evidenceImages, evidenceVersion } = updated[0];
+        const ready = updated.filter((c) => c.evidenceReady === true).length;
+        // Retain warnings unrelated to the photo capture.
+        const otherWarnings = (property.error || "")
+          .split(" · ")
+          .filter(
+            (part) =>
+              part &&
+              !/^(ภาพประกาศยังโหลดไม่ครบ|รูปถ่ายทรัพย์จากต้นทางยังตรวจได้ไม่ครบ)/.test(
+                part,
+              ),
+          );
+        await db.updateSource(id, {
+          screenshotUrl,
+          evidenceImages,
+          evidenceVersion,
+          evidenceReady: ready === updated.length,
+          error: otherWarnings.join(" · ") || null,
+          ...(property.assetComponents?.length
+            ? { assetComponents: updated }
+            : {}),
+        });
+        for (const capture of captures) {
+          const prefix = `ทรัพย์ ${capture.assetSequence} คดี ${capture.caseNumber}: `;
+          await db.recordCheck({
+            key: `led:${id}::${capture.componentKey}`,
+            message: capture.evidenceReady
+              ? null
+              : prefix + (capture.error || "รูปประกาศยังโหลดไม่ครบ"),
+            retryable: !capture.evidenceReady,
+            attempts:
+              job.detailAttempts.get(`${id}::${capture.componentKey}`) || 0,
+            legacyPrefix: prefix,
+          });
+        }
+        return {
+          property: await db.getProperty(id),
+          checked: captures.length,
+          requested: targetKeys.size,
+          complete:
+            ready === updated.length && captures.length === targetKeys.size,
+        };
+      });
     },
     async init() {
       await db.saveSettings(await db.getSettings());
@@ -466,8 +497,8 @@ export function createSyncService({
       }
     },
     async settings(value) {
-      if (stopping || running || savingSettings || photoRefresh)
-        throw Error("รองานซิงค์หรือรีเฟรชรูปก่อนเปลี่ยนขอบเขต");
+      if (stopping || running || savingSettings || manualRefresh)
+        throw Error("รองานซิงค์หรือรีเฟรชก่อนเปลี่ยนขอบเขต");
       const checked = validateSettings(value, geography);
       savingSettings = true;
       try {
@@ -482,8 +513,8 @@ export function createSyncService({
       return checked;
     },
     async start(geoOnly = false, automatic = false) {
-      if (stopping || running || savingSettings || photoRefresh)
-        throw Error("มีงานซิงค์หรือรีเฟรชรูปกำลังทำงานอยู่");
+      if (stopping || running || savingSettings || manualRefresh)
+        throw Error("มีงานซิงค์ รีเฟรชรูป หรือรีเฟรชโฉนดกำลังทำงานอยู่");
       if (
         geoOnly &&
         state.geoRetryAt &&
@@ -548,12 +579,12 @@ export function createSyncService({
       controller?.abort();
     },
     async tick() {
-      if (stopping || ticking || running || savingSettings || photoRefresh)
+      if (stopping || ticking || running || savingSettings || manualRefresh)
         return;
       ticking = true;
       try {
         const s = await db.getSettings();
-        if (stopping || running || savingSettings || photoRefresh) return;
+        if (stopping || running || savingSettings || manualRefresh) return;
         const now = clock().getTime();
         const due = (at) => !at || Date.parse(at) <= now;
         if (s.enabled && due(state.nextRunAt)) await service.start(false, true);
@@ -579,9 +610,9 @@ export function createSyncService({
       stopping = true;
       clearInterval(timer);
       service.cancel();
-      photoRefresh?.cancel();
+      manualRefresh?.cancel();
       await service.task;
-      await photoRefresh?.task.catch(() => {});
+      await manualRefresh?.task.catch(() => {});
     },
     cleanup,
   };

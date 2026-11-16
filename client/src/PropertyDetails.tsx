@@ -6,9 +6,15 @@ import {
   ExternalLink,
   Save,
   RefreshCw,
+  LoaderCircle,
   Image as ImageIcon,
 } from "lucide-react";
-import type { CaseBox, Property, UserNotes } from "./catalog-types";
+import type {
+  CaseBox,
+  DetailAction,
+  Property,
+  UserNotes,
+} from "./catalog-types";
 import { EvidenceImage } from "./EvidenceImage";
 import { mapParcels, money, time, today, auctionDay } from "./catalog-api";
 import { approximateLocation } from "./approximate-location";
@@ -41,6 +47,8 @@ export function PropertyDetails({
   onClose,
   onSave,
   onFacebook,
+  detailAction,
+  onRefreshDeeds,
   onRefreshPhotos,
   onImage,
 }: {
@@ -48,6 +56,8 @@ export function PropertyDetails({
   onClose: () => void;
   onSave: (patch: Partial<UserNotes>) => Promise<void>;
   onFacebook: (postUrl: string) => Promise<void>;
+  detailAction: DetailAction | null;
+  onRefreshDeeds: () => Promise<{ confirmed: number; requested: number }>;
   onRefreshPhotos: () => Promise<{
     checked: number;
     requested: number;
@@ -65,16 +75,21 @@ export function PropertyDetails({
     [commentDraft, setCommentDraft] = useState<string | null>(null),
     [savingComment, setSavingComment] = useState(false),
     [commentError, setCommentError] = useState(""),
-    [fbBusy, setFbBusy] = useState(false),
     [fbError, setFbError] = useState(""),
     [fbPostUrl, setFbPostUrl] = useState(""),
-    [photoBusy, setPhotoBusy] = useState(false),
+    [deedMessage, setDeedMessage] = useState<{
+      text: string;
+      warning: boolean;
+    } | null>(null),
     [photoMessage, setPhotoMessage] = useState<{
       text: string;
       warning: boolean;
     } | null>(null);
   const user = { ...p.user, ...pendingPreferences };
   const comment = commentDraft ?? p.user.comment;
+  const photoBusy = detailAction === "photos";
+  const deedRefreshing = detailAction === "deeds";
+  const facebookLoading = detailAction === "facebook";
   async function savePreferences(patch: Partial<Omit<UserNotes, "comment">>) {
     if (pendingPreferences) return;
     setPendingPreferences(patch);
@@ -336,9 +351,10 @@ export function PropertyDetails({
             <div className="detail-section-heading">
               <h3>ภาพประกาศกรมบังคับคดี</h3>
               <button
-                disabled={photoBusy}
+                type="button"
+                disabled={detailAction !== null}
+                aria-busy={photoBusy}
                 onClick={async () => {
-                  setPhotoBusy(true);
                   setPhotoMessage(null);
                   try {
                     const result = await onRefreshPhotos();
@@ -353,13 +369,19 @@ export function PropertyDetails({
                       text: (e as Error).message,
                       warning: true,
                     });
-                  } finally {
-                    setPhotoBusy(false);
                   }
                 }}
               >
-                <RefreshCw size={15} />{" "}
-                {photoBusy ? "กำลังดึงรูปใหม่…" : "รีเฟรชรูปประกาศ"}
+                {photoBusy ? (
+                  <LoaderCircle
+                    size={15}
+                    className="action-spinner"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <RefreshCw size={15} aria-hidden="true" />
+                )}
+                {photoBusy ? "กำลังรีเฟรชรูปประกาศ…" : "รีเฟรชรูปประกาศ"}
               </button>
             </div>
             {photoMessage && (
@@ -415,7 +437,50 @@ export function PropertyDetails({
                 </div>
               </section>
             )}
-            <h3>หลักฐาน LandsMaps</h3>
+            <div className="detail-section-heading">
+              <h3>หลักฐาน LandsMaps</h3>
+              {p.deed && (
+                <button
+                  type="button"
+                  disabled={detailAction !== null}
+                  aria-busy={deedRefreshing}
+                  onClick={async () => {
+                    setDeedMessage(null);
+                    try {
+                      const { confirmed, requested } = await onRefreshDeeds();
+                      setDeedMessage({
+                        text: `ยืนยันพิกัดและหลักฐานได้ ${confirmed}/${requested} โฉนด`,
+                        warning: confirmed < requested,
+                      });
+                    } catch (error) {
+                      setDeedMessage({
+                        text: (error as Error).message,
+                        warning: true,
+                      });
+                    }
+                  }}
+                >
+                  {deedRefreshing ? (
+                    <LoaderCircle
+                      size={15}
+                      className="action-spinner"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <RefreshCw size={15} aria-hidden="true" />
+                  )}
+                  {deedRefreshing ? "กำลังรีเฟรชโฉนด…" : "รีเฟรชโฉนด"}
+                </button>
+              )}
+            </div>
+            {deedMessage && (
+              <p
+                role="status"
+                className={deedMessage.warning ? "inline-error" : "small"}
+              >
+                {deedMessage.text}
+              </p>
+            )}
             {estimate && (
               <p className="info-note">
                 พิกัดโดยประมาณอิงพื้นที่ {estimate.area}{" "}
@@ -481,26 +546,33 @@ export function PropertyDetails({
                 <input
                   type="url"
                   aria-label="ลิงก์โพสต์ Facebook"
+                  disabled={facebookLoading}
                   value={fbPostUrl}
                   onChange={(event) => setFbPostUrl(event.target.value)}
                 />
               </details>
               <button
+                type="button"
                 className="primary"
-                disabled={fbBusy}
+                disabled={detailAction !== null}
+                aria-busy={facebookLoading}
                 onClick={async () => {
-                  setFbBusy(true);
                   setFbError("");
                   try {
                     await onFacebook(fbPostUrl);
                   } catch (error) {
                     setFbError((error as Error).message);
-                  } finally {
-                    setFbBusy(false);
                   }
                 }}
               >
-                {fbBusy
+                {facebookLoading && (
+                  <LoaderCircle
+                    size={16}
+                    className="action-spinner"
+                    aria-hidden="true"
+                  />
+                )}
+                {facebookLoading
                   ? "กำลังค้นโพสต์และอ่านเลขคดีในรูป…"
                   : "ดึงข้อมูลจาก Facebook"}
               </button>

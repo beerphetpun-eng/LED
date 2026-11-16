@@ -17,7 +17,7 @@ try {
     signal: AbortSignal.timeout(1500),
   }).then((r) => r.json());
   if (health.source === "LED + LandsMaps") {
-    if (!health.capabilities?.facebookAuctionSchedule) {
+    if (!health.capabilities?.deedRefresh) {
       console.error(
         "Land Radar is running an older server. Stop the old server before opening Start.cmd again.",
       );
