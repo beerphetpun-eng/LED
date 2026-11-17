@@ -10,6 +10,12 @@ React + PostgreSQL workspace for tracking LED auction properties locally at **ht
 
 เครื่องนี้ใช้ฐานข้อมูล `led_radar` / schema `land_radar` รหัสอยู่ใน `server/appsettings.Local.json` ซึ่งไม่รวมใน Git ภาพอยู่ใน `server/data/evidence/` ให้สำรองฐานข้อมูลและภาพคู่กัน
 
+### เปิดจากภายนอกผ่าน Cloudflare Tunnel
+
+ให้ Tunnel ชี้มาที่ `http://127.0.0.1:5080` โดยคง Host เดิมของ Tunnel ไว้ สร้างไฟล์ `server/data/remote-access.json` แล้วระบุ `hostname` เป็นโดเมนของ Tunnel โดยไม่ใส่ `https://` และ `password` เป็นรหัสสุ่มอย่างน้อย 24 ตัวอักษร ASCII ที่ไม่มีช่องว่าง จากนั้นเริ่ม Land Radar ใหม่ เปิดลิงก์ HTTPS แล้วใช้ชื่อผู้ใช้ `landradar` และรหัสจากไฟล์นี้ ไฟล์อยู่ในโฟลเดอร์ที่ Git ข้ามไว้
+
+Quick Tunnel ใช้ลิงก์ที่ Cloudflare สุ่มให้ขณะโปรเซส `cloudflared` ทำงาน หากเปิด Tunnel ใหม่และได้รับโดเมนใหม่ ให้แก้ `hostname` แล้วเริ่ม Land Radar ใหม่
+
 ## สองชุดตัวกรอง
 
 - **ตั้งค่าซิงค์:** เลือก checkbox จังหวัดและอำเภอได้หลายรายการ บันทึกใน PostgreSQL ค่าเริ่มต้นคือเชียงใหม่ / เมืองเชียงใหม่ ซิงค์ทุกประเภททรัพย์ ทุกช่วงราคา และทุกขนาดพื้นที่ที่ต้นทางส่งมา ข้ามแถวสีแดงตามคำขอเดิม
