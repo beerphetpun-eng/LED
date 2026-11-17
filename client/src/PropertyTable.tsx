@@ -10,7 +10,6 @@ type Column = {
   value: (p: Property) => Value;
   display?: (p: Property) => ReactNode;
   truncate?: boolean;
-  personal?: boolean;
 };
 const collator = new Intl.Collator("th", { numeric: true });
 const columns: Column[] = [
@@ -44,7 +43,6 @@ const columns: Column[] = [
   },
   {
     label: "ดาว",
-    personal: true,
     value: (p) => p.user.stars,
     display: (p) => (
       <span className="table-stars">
@@ -62,7 +60,6 @@ const columns: Column[] = [
   },
   {
     label: "บุ๊กมาร์ก",
-    personal: true,
     value: (p) => Number(p.user.bookmarked),
     display: (p) => (p.user.bookmarked ? "บันทึกแล้ว" : "—"),
   },
@@ -72,7 +69,6 @@ const columns: Column[] = [
   },
   {
     label: "สถานะประมูล",
-    personal: true,
     value: (p) =>
       p.user.auctionStatus === "ended"
         ? "จบประมูลแล้ว"
@@ -86,11 +82,9 @@ const columns: Column[] = [
 export function PropertyTable({
   items,
   onSelect,
-  readOnly,
 }: {
   items: Property[];
   onSelect: (p: Property) => void;
-  readOnly: boolean;
 }) {
   const [sort, setSort] = useState<{
     index: number;
@@ -122,41 +116,38 @@ export function PropertyTable({
             <th className="table-open" scope="col">
               เปิด
             </th>
-            {columns.map(
-              (column, index) =>
-                (!readOnly || !column.personal) && (
-                  <th
-                    key={column.label}
-                    scope="col"
-                    aria-sort={
-                      sort?.index === index
-                        ? sort.descending
-                          ? "descending"
-                          : "ascending"
-                        : undefined
-                    }
-                  >
-                    <button
-                      onClick={() =>
-                        setSort({
-                          index,
-                          descending:
-                            sort?.index === index ? !sort.descending : false,
-                        })
-                      }
-                    >
-                      {column.label}{" "}
-                      <span aria-hidden="true">
-                        {sort?.index === index
-                          ? sort.descending
-                            ? "↓"
-                            : "↑"
-                          : "↕"}
-                      </span>
-                    </button>
-                  </th>
-                ),
-            )}
+            {columns.map((column, index) => (
+              <th
+                key={column.label}
+                scope="col"
+                aria-sort={
+                  sort?.index === index
+                    ? sort.descending
+                      ? "descending"
+                      : "ascending"
+                    : undefined
+                }
+              >
+                <button
+                  onClick={() =>
+                    setSort({
+                      index,
+                      descending:
+                        sort?.index === index ? !sort.descending : false,
+                    })
+                  }
+                >
+                  {column.label}{" "}
+                  <span aria-hidden="true">
+                    {sort?.index === index
+                      ? sort.descending
+                        ? "↓"
+                        : "↑"
+                      : "↕"}
+                  </span>
+                </button>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -171,7 +162,6 @@ export function PropertyTable({
                 </button>
               </td>
               {columns.map((column) => {
-                if (readOnly && column.personal) return null;
                 const value = column.display
                   ? column.display(p)
                   : (column.value(p) ?? "—");

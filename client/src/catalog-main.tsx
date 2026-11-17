@@ -95,7 +95,6 @@ function ViewMap({
 function App() {
   const [library, setLibrary] = useState<Library>(emptyLibrary),
     [sync, setSync] = useState<SyncResponse | null>(null),
-    [readOnly, setReadOnly] = useState(false),
     [geography, setGeography] = useState<Province[]>([]),
     [tab, setTab] = useState("explore"),
     [error, setError] = useState(""),
@@ -165,11 +164,7 @@ function App() {
     }
   }
   async function loadSync() {
-    const s = await api<SyncResponse | { readOnly: true }>("/sync");
-    if ("readOnly" in s) {
-      setReadOnly(true);
-      return null;
-    }
+    const s = await api<SyncResponse>("/sync");
     setSync(s);
     return s;
   }
@@ -199,7 +194,7 @@ function App() {
       polling = true;
       void loadSync()
         .then(async (s) => {
-          if (++n % 3 === 0 || !s?.runtime.running) {
+          if (++n % 3 === 0 || !s.runtime.running) {
             await loadLibrary();
             const id = selectedId.current;
             if (id) {
@@ -403,15 +398,13 @@ function App() {
             <MapPin size={16} />
             สำรวจทรัพย์
           </button>
-          {!readOnly && (
-            <button
-              className={tab === "sync" ? "active" : ""}
-              onClick={() => setTab("sync")}
-            >
-              <SettingsIcon size={16} />
-              ตั้งค่าซิงค์
-            </button>
-          )}
+          <button
+            className={tab === "sync" ? "active" : ""}
+            onClick={() => setTab("sync")}
+          >
+            <SettingsIcon size={16} />
+            ตั้งค่าซิงค์
+          </button>
           <AlertMenu
             alerts={sync?.alerts || []}
             error={error}
@@ -429,14 +422,10 @@ function App() {
         </nav>
         <span className="db-badge">
           <Database size={14} />
-          {readOnly
-            ? "ดูข้อมูลเท่านั้น"
-            : sync
-              ? "PostgreSQL · ในเครื่อง"
-              : "กำลังเชื่อมต่อ"}
+          {sync ? "PostgreSQL · ในเครื่อง" : "กำลังเชื่อมต่อ"}
         </span>
       </header>
-      {tab === "sync" && !readOnly ? (
+      {tab === "sync" ? (
         <main className="sync-page">
           <section className="sync-strip">
             <div>
@@ -634,11 +623,7 @@ function App() {
               <Search size={16} />
               <input
                 aria-label="ค้นหาทรัพย์"
-                placeholder={
-                  readOnly
-                    ? "เลขคดี โฉนด หรือลำดับ"
-                    : "เลขคดี โฉนด ลำดับ หรือคอมเมนต์"
-                }
+                placeholder="เลขคดี โฉนด ลำดับ หรือคอมเมนต์"
                 value={filters.q || ""}
                 onChange={(e) => filter("q", e.target.value)}
               />
@@ -695,34 +680,30 @@ function App() {
                 />
               </label>
             </div>
-            {!readOnly && (
-              <>
-                {field(
-                  "คะแนนดาว",
-                  "stars",
-                  [0, 1, 2, 3, 4, 5].map((n) => ({
-                    value: String(n),
-                    label: n + " ดาว",
-                  })),
-                )}
-                {field("สถานะที่ผู้ใช้กรอก", "auctionStatus", [
-                  { value: "auctioning", label: "ยังอยู่ในสถานะประมูล" },
-                  { value: "ended", label: "จบการประมูลแล้ว" },
-                  { value: "unset", label: "ยังไม่ระบุ" },
-                ])}
-                <label className="check bookmark-filter">
-                  <input
-                    type="checkbox"
-                    checked={filters.bookmarked === "true"}
-                    onChange={(e) =>
-                      filter("bookmarked", e.target.checked ? "true" : "")
-                    }
-                  />
-                  <Bookmark size={15} />
-                  เฉพาะที่บุ๊กมาร์ก
-                </label>
-              </>
+            {field(
+              "คะแนนดาว",
+              "stars",
+              [0, 1, 2, 3, 4, 5].map((n) => ({
+                value: String(n),
+                label: n + " ดาว",
+              })),
             )}
+            {field("สถานะที่ผู้ใช้กรอก", "auctionStatus", [
+              { value: "auctioning", label: "ยังอยู่ในสถานะประมูล" },
+              { value: "ended", label: "จบการประมูลแล้ว" },
+              { value: "unset", label: "ยังไม่ระบุ" },
+            ])}
+            <label className="check bookmark-filter">
+              <input
+                type="checkbox"
+                checked={filters.bookmarked === "true"}
+                onChange={(e) =>
+                  filter("bookmarked", e.target.checked ? "true" : "")
+                }
+              />
+              <Bookmark size={15} />
+              เฉพาะที่บุ๊กมาร์ก
+            </label>
           </aside>
           <section className="results">
             <div className="results-toolbar">
@@ -895,7 +876,6 @@ function App() {
               {listMode === "table" ? (
                 <PropertyTable
                   items={library.items}
-                  readOnly={readOnly}
                   onSelect={(p) => void select(p).catch(() => {})}
                 />
               ) : (
@@ -941,15 +921,13 @@ function App() {
                       )}
                       <div className="card-status">
                         <span>{mapLocationLabel(p)}</span>
-                        {!readOnly && (
-                          <span>
-                            {p.user.auctionStatus === "ended"
-                              ? "จบประมูลแล้ว"
-                              : p.user.auctionStatus === "auctioning"
-                                ? "อยู่ระหว่างประมูล"
-                                : "ยังไม่ระบุสถานะ"}
-                          </span>
-                        )}
+                        <span>
+                          {p.user.auctionStatus === "ended"
+                            ? "จบประมูลแล้ว"
+                            : p.user.auctionStatus === "auctioning"
+                              ? "อยู่ระหว่างประมูล"
+                              : "ยังไม่ระบุสถานะ"}
+                        </span>
                       </div>
                     </button>
                   ))}
@@ -984,7 +962,6 @@ function App() {
         <PropertyDetails
           key={selected.id}
           property={selected}
-          readOnly={readOnly}
           onClose={closeDetails}
           onSave={(patch) => saveUser(selected.id, patch)}
           detailAction={detailAction}
