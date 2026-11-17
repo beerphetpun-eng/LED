@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import {
   BrowserService,
   root,
@@ -14,6 +14,14 @@ import { createEvidenceStore } from "./infrastructure/evidence-store.mjs";
 import { loadGeography } from "./infrastructure/geography-source.mjs";
 import { createFacebookSource } from "./infrastructure/facebook-source.mjs";
 import { createFacebookCaseIndex } from "./infrastructure/facebook-case-index.mjs";
+const remoteAccess = await readFile(
+  new URL("./data/remote-access.json", import.meta.url),
+  "utf8",
+)
+  .then(JSON.parse)
+  .catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  });
 await db.init();
 await mkdir(evidencePath, { recursive: true });
 const browser = new BrowserService();
@@ -56,6 +64,7 @@ const app = createCatalogHttp({
   facebook,
   root,
   evidencePath,
+  remoteAccess,
 });
 const server = app.listen(5080, "127.0.0.1", (error) => {
   if (error) throw error;

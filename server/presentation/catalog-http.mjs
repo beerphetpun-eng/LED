@@ -1,5 +1,6 @@
 import express from "express";
 import path from "node:path";
+import { createRemoteAccess, restrictHost } from "./remote-access.mjs";
 export function createCatalogHttp({
   repository: db,
   sync,
@@ -7,30 +8,31 @@ export function createCatalogHttp({
   facebook,
   root,
   evidencePath,
+  remoteAccess,
 }) {
   const propertyDetails = async (property) => ({
     ...property,
     facebook: await facebook.forProperty(property),
   });
   const app = express();
+  const remote = createRemoteAccess(remoteAccess);
   app.disable("x-powered-by");
-  app.use((req, res, next) => {
-    if (!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(req.get("Host") || ""))
-      return res.status(403).json({ error: "เปิด Land Radar ผ่าน localhost" });
-    next();
-  });
+  app.use(restrictHost(remote));
   app.use(express.json({ limit: "150kb" }));
   app.use("/api", (req, res, next) => {
-    res.set("Cache-Control", "no-store");
+    res.set("Cache-Control", "private, no-store");
+    const origin = req.get("Origin");
+    const validOrigin = res.locals.remoteAccess
+      ? origin === remote.origin
+      : !origin ||
+        [
+          "http://127.0.0.1:5080",
+          "http://localhost:5080",
+          "http://127.0.0.1:5173",
+        ].includes(origin);
     if (
       req.method !== "GET" &&
-      (req.get("X-Land-Radar") !== "1" ||
-        (req.get("Origin") &&
-          ![
-            "http://127.0.0.1:5080",
-            "http://localhost:5080",
-            "http://127.0.0.1:5173",
-          ].includes(req.get("Origin"))))
+      (req.get("X-Land-Radar") !== "1" || !validOrigin)
     )
       return res.status(403).json({ error: "ไม่อนุญาตคำขอข้ามเว็บไซต์" });
     next();
