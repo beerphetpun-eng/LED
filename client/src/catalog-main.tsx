@@ -103,6 +103,7 @@ function App() {
     [detailAction, setDetailAction] = useState<DetailAction | null>(null),
     [facebookRefreshing, setFacebookRefreshing] = useState(false),
     [full, setFull] = useState(false),
+    [mapTileError, setMapTileError] = useState(false),
     [filtersCollapsed, setFiltersCollapsed] = useState(true),
     [view, setView] = useState<"map" | "list">("map"),
     [listMode, setListMode] = useState<"cards" | "table">("table"),
@@ -845,7 +846,12 @@ function App() {
                 >
                   <TileLayer
                     url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    referrerPolicy="strict-origin-when-cross-origin"
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+                    eventHandlers={{
+                      loading: () => setMapTileError(false),
+                      tileerror: () => setMapTileError(true),
+                    }}
                   />
                   <ViewMap
                     coordinates={pins.map(({ v }) => [v.latitude, v.longitude])}
@@ -864,12 +870,19 @@ function App() {
                     }}
                   />
                 </MapContainer>
-                {!pins.length && (
-                  <div className="map-empty">
-                    {library.items.length
-                      ? "เปิดแท็บรายการทรัพย์เพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
-                      : "ผลค้นหาจะแสดงบนแผนที่นี้"}
+                {mapTileError ? (
+                  <div className="map-empty" role="status">
+                    โหลดภาพพื้นหลังแผนที่ได้ไม่ครบ
+                    <small>ลองรีเฟรชหน้า หรือเปิดแท็บรายการทรัพย์</small>
                   </div>
+                ) : (
+                  !pins.length && (
+                    <div className="map-empty">
+                      {library.items.length
+                        ? "เปิดแท็บรายการทรัพย์เพื่อดูทรัพย์ที่ยังไม่มีพิกัด"
+                        : "ผลค้นหาจะแสดงบนแผนที่นี้"}
+                    </div>
+                  )
                 )}
               </div>
             </section>
