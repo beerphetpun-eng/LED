@@ -269,20 +269,9 @@ export async function allProperties() {
     await pool.query(propertySelect + " ORDER BY s.last_seen DESC,p.id")
   ).rows.map(hydrate);
 }
-export async function queryProperties(
-  filters,
-  { includeUserNotes = true } = {},
-) {
-  const properties = await allProperties();
-  const all = includeUserNotes
-    ? properties
-    : properties.map((property) => ({ ...property, user: emptyUser() }));
-  const items = filterProperties(
-    all,
-    includeUserNotes
-      ? filters
-      : { ...filters, stars: "", bookmarked: "", auctionStatus: "" },
-  );
+export async function queryProperties(filters) {
+  const all = await allProperties(),
+    items = filterProperties(all, filters);
   const summary = items.map(
     ({ rawText, sourceRow, facebook, assetComponents, ...p }) => ({
       ...p,

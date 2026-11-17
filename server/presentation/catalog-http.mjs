@@ -1,16 +1,6 @@
 import express from "express";
 import path from "node:path";
-import { emptyUser } from "../domain/catalog.mjs";
 import { createRemoteAccess, restrictHost } from "./remote-access.mjs";
-function withoutUserNotes(property) {
-  return {
-    ...property,
-    user: emptyUser(),
-    ...(property.assetComponents && {
-      assetComponents: property.assetComponents.map(withoutUserNotes),
-    }),
-  };
-}
 export function createCatalogHttp({
   repository: db,
   sync,
@@ -41,7 +31,7 @@ export function createCatalogHttp({
           "http://127.0.0.1:5173",
         ].includes(origin);
     if (
-      !["GET", "HEAD"].includes(req.method) &&
+      req.method !== "GET" &&
       (req.get("X-Land-Radar") !== "1" || !validOrigin)
     )
       return res.status(403).json({ error: "ไม่อนุญาตคำขอข้ามเว็บไซต์" });
@@ -78,17 +68,13 @@ export function createCatalogHttp({
   });
   app.get("/api/geography", (req, res) => res.json(geography));
   app.get("/api/sync", async (req, res) =>
-    res.json(
-      res.locals.publicReadOnly
-        ? { readOnly: true }
-        : {
-            settings: await db.getSettings(),
-            runtime: sync.status(),
-            alerts: await db.alerts(),
-            facebookLibrary: await facebook.status(),
-            lastCleanup: await db.getState("last_cleanup"),
-          },
-    ),
+    res.json({
+      settings: await db.getSettings(),
+      runtime: sync.status(),
+      alerts: await db.alerts(),
+      facebookLibrary: await facebook.status(),
+      lastCleanup: await db.getState("last_cleanup"),
+    }),
   );
   app.put("/api/sync/settings", async (req, res) =>
     res.json(await sync.settings(req.body)),
@@ -107,11 +93,7 @@ export function createCatalogHttp({
     res.json({ ok: true });
   });
   app.get("/api/properties", async (req, res) =>
-    res.json(
-      await db.queryProperties(req.query, {
-        includeUserNotes: !res.locals.publicReadOnly,
-      }),
-    ),
+    res.json(await db.queryProperties(req.query)),
   );
   app.param("propertyId", (req, res, next, id) =>
     /^[a-f0-9]{32}$/.test(id)
@@ -121,11 +103,7 @@ export function createCatalogHttp({
   app.get("/api/properties/:propertyId", async (req, res) => {
     const p = await db.getProperty(req.params.propertyId);
     p
-      ? res.json(
-          await propertyDetails(
-            res.locals.publicReadOnly ? withoutUserNotes(p) : p,
-          ),
-        )
+      ? res.json(await propertyDetails(p))
       : res.status(404).json({ error: "ไม่พบทรัพย์ อาจหมดอายุและถูกลบแล้ว" });
   });
   app.patch("/api/properties/:propertyId/user", async (req, res) =>
@@ -155,8 +133,6 @@ export function createCatalogHttp({
   );
   app.use((e, req, res, next) => {
     if (res.headersSent) return next(e);
-    if (res.locals.publicReadOnly)
-      return res.status(400).json({ error: "เปิดข้อมูลที่ขอไม่สำเร็จ" });
     if (e.type === "entity.parse.failed")
       return res.status(400).json({ error: "ข้อมูล JSON ไม่ถูกต้อง" });
     if (e.type === "entity.too.large")

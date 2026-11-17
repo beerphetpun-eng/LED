@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { get, request } from "node:http";
 import { createCatalogHttp } from "../server/presentation/catalog-http.mjs";
 
-function send(url, headers, method = "GET") {
+function send(url, headers, method = "GET", body) {
   return new Promise((resolve, reject) => {
     request(url, { headers, method }, async (response) => {
       try {
@@ -21,7 +21,7 @@ function send(url, headers, method = "GET") {
       }
     })
       .on("error", reject)
-      .end();
+      .end(body);
   });
 }
 
@@ -162,47 +162,67 @@ test("the configured remote host requires credentials for the app, data and evid
   assert.deepEqual(await started.json(), { started: 1 });
 });
 
-test("passwordless public access can read properties without exposing user notes or local controls", async (t) => {
+test("passwordless remote sessions use the same notes, edits and sync routes as local sessions", async (t) => {
   const hostname = "land-radar.example.test";
   const id = "a".repeat(32);
-  const user = { comment: "private note", bookmarked: true };
+  const property = { id, user: { comment: "existing note", stars: 4 } };
   const app = createCatalogHttp({
     repository: {
-      getProperty: async () => ({ id, user, assetComponents: [{ user }] }),
-      queryProperties: async (_filters, options) => options,
+      getProperty: async () => property,
+      updateUser: async (propertyId, patch) => {
+        assert.equal(propertyId, id);
+        Object.assign(property.user, patch);
+        return property;
+      },
     },
     facebook: { forProperty: async () => ({ posts: [] }) },
     sync: { start: async () => ({ started: true }) },
     root: process.cwd(),
     evidencePath: process.cwd(),
-    remoteAccess: { hostname, publicReadOnly: true },
+    remoteAccess: { hostname, requirePassword: false },
   });
   const server = app.listen(0, "127.0.0.1");
   t.after(() => server.close());
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}/api`;
+  const url = `${base}/properties/${id}`;
+  const detail = await send(url, { Host: hostname });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.headers.get("www-authenticate"), null);
+  assert.equal((await detail.json()).user.comment, "existing note");
+
   const headers = {
     Host: hostname,
     Origin: "https://" + hostname,
     "X-Land-Radar": "1",
   };
-  assert.deepEqual(await (await send(base + "/sync", headers)).json(), {
-    readOnly: true,
-  });
-  assert.deepEqual(await (await send(base + "/properties", headers)).json(), {
-    includeUserNotes: false,
-  });
-  const detail = await send(base + "/properties/" + id, headers);
-  assert.equal(detail.status, 200);
-  assert.equal(detail.headers.get("www-authenticate"), null);
-  const property = await detail.json();
-  assert.equal(property.user.comment, "");
-  assert.equal(property.assetComponents[0].user.bookmarked, false);
-  assert.equal((await send(base + "/sync/start", headers, "POST")).status, 403);
-  const local = await send(
-    base + "/sync/start",
-    { "X-Land-Radar": "1" },
-    "POST",
+  const patch = JSON.stringify({ stars: 5 });
+  const saved = await send(
+    url + "/user",
+    {
+      ...headers,
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(patch),
+    },
+    "PATCH",
+    patch,
   );
-  assert.equal(local.status, 200);
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).user.stars, 5);
+
+  const sync = base + "/sync/start";
+  assert.equal((await send(sync, { Host: hostname }, "POST")).status, 403);
+  assert.equal(
+    (
+      await send(
+        sync,
+        { ...headers, Origin: "https://other.example.test" },
+        "POST",
+      )
+    ).status,
+    403,
+  );
+  assert.deepEqual(await (await send(sync, headers, "POST")).json(), {
+    started: true,
+  });
 });
