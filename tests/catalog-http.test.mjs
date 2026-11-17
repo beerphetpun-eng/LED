@@ -4,6 +4,27 @@ import { once } from "node:events";
 import { get, request } from "node:http";
 import { createCatalogHttp } from "../server/presentation/catalog-http.mjs";
 
+function send(url, headers, method = "GET") {
+  return new Promise((resolve, reject) => {
+    request(url, { headers, method }, async (response) => {
+      try {
+        const chunks = [];
+        for await (const bytes of response) chunks.push(bytes);
+        resolve(
+          new Response(Buffer.concat(chunks), {
+            status: response.statusCode,
+            headers: response.headers,
+          }),
+        );
+      } catch (error) {
+        reject(error);
+      }
+    })
+      .on("error", reject)
+      .end();
+  });
+}
+
 test("database outages preserve server identity and malformed JSON stays out of alerts", async (t) => {
   const messages = [];
   const app = createCatalogHttp({
@@ -106,28 +127,8 @@ test("the configured remote host requires credentials for the app, data and evid
   t.after(() => server.close());
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
-  const send = (route, headers, method = "GET") =>
-    new Promise((resolve, reject) => {
-      request(base + route, { headers, method }, async (response) => {
-        try {
-          const chunks = [];
-          for await (const bytes of response) chunks.push(bytes);
-          resolve(
-            new Response(Buffer.concat(chunks), {
-              status: response.statusCode,
-              headers: response.headers,
-            }),
-          );
-        } catch (error) {
-          reject(error);
-        }
-      })
-        .on("error", reject)
-        .end();
-    });
-
   for (const route of ["/", "/api/health", "/evidence/photo.jpg"]) {
-    const response = await send(route, { Host: hostname });
+    const response = await send(base + route, { Host: hostname });
     assert.equal(response.status, 401);
     assert.match(response.headers.get("www-authenticate"), /^Basic /);
     assert.match(response.headers.get("cache-control"), /no-store/);
@@ -136,14 +137,14 @@ test("the configured remote host requires credentials for the app, data and evid
     { Host: "other.example.test", Authorization: authorization },
     { "CF-Ray": "test", Host: "localhost" },
   ]) {
-    assert.equal((await send("/api/health", headers)).status, 403);
+    assert.equal((await send(base + "/api/health", headers)).status, 403);
   }
   assert.equal((await fetch(base + "/api/health")).status, 200);
 
   const headers = { Host: hostname, Authorization: authorization };
-  assert.equal((await send("/api/health", headers)).status, 200);
+  assert.equal((await send(base + "/api/health", headers)).status, 200);
   const start = (extraHeaders) =>
-    send("/api/sync/start", { ...headers, ...extraHeaders }, "POST");
+    send(base + "/api/sync/start", { ...headers, ...extraHeaders }, "POST");
   assert.equal((await start({ Origin: "https://" + hostname })).status, 403);
   assert.equal(
     (
@@ -159,4 +160,49 @@ test("the configured remote host requires credentials for the app, data and evid
     "X-Land-Radar": "1",
   });
   assert.deepEqual(await started.json(), { started: 1 });
+});
+
+test("passwordless public access can read properties without exposing user notes or local controls", async (t) => {
+  const hostname = "land-radar.example.test";
+  const id = "a".repeat(32);
+  const user = { comment: "private note", bookmarked: true };
+  const app = createCatalogHttp({
+    repository: {
+      getProperty: async () => ({ id, user, assetComponents: [{ user }] }),
+      queryProperties: async (_filters, options) => options,
+    },
+    facebook: { forProperty: async () => ({ posts: [] }) },
+    sync: { start: async () => ({ started: true }) },
+    root: process.cwd(),
+    evidencePath: process.cwd(),
+    remoteAccess: { hostname, publicReadOnly: true },
+  });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const headers = {
+    Host: hostname,
+    Origin: "https://" + hostname,
+    "X-Land-Radar": "1",
+  };
+  assert.deepEqual(await (await send(base + "/sync", headers)).json(), {
+    readOnly: true,
+  });
+  assert.deepEqual(await (await send(base + "/properties", headers)).json(), {
+    includeUserNotes: false,
+  });
+  const detail = await send(base + "/properties/" + id, headers);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.headers.get("www-authenticate"), null);
+  const property = await detail.json();
+  assert.equal(property.user.comment, "");
+  assert.equal(property.assetComponents[0].user.bookmarked, false);
+  assert.equal((await send(base + "/sync/start", headers, "POST")).status, 403);
+  const local = await send(
+    base + "/sync/start",
+    { "X-Land-Radar": "1" },
+    "POST",
+  );
+  assert.equal(local.status, 200);
 });
