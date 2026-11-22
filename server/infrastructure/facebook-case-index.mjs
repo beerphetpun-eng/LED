@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   facebookCaseNumber,
+  facebookCaseVersion,
   findFacebookCaseBoxes,
 } from "../domain/facebook-case.mjs";
 import { recognizeFacebookCases } from "./facebook-image-filter.mjs";
@@ -36,7 +37,10 @@ export function createFacebookCaseIndex({
       if (abort.signal.aborted) return;
       for (const [position, url] of urls.entries()) {
         const entry = entries.get(url);
-        const index = indexes[position];
+        const recognized = indexes[position];
+        const index = recognized
+          ? { ...recognized, version: facebookCaseVersion }
+          : null;
         entry.pending = false;
         entry.index = index || null;
         if (!index) {
@@ -54,7 +58,10 @@ export function createFacebookCaseIndex({
 
   function start() {
     if (!task && queue.size && !abort.signal.aborted) {
-      task = processQueue().finally(() => {
+      // Bound the CPU and memory cost while rebuilding a shared image library.
+      task = Promise.all(
+        Array.from({ length: 3 }, () => processQueue()),
+      ).finally(() => {
         task = undefined;
         start();
       });
@@ -68,7 +75,7 @@ export function createFacebookCaseIndex({
       entries.set(url, entry);
       entry.loaded = read(url)
         .then((saved) => {
-          entry.index = saved;
+          entry.index = saved?.version === facebookCaseVersion ? saved : null;
         })
         .catch((error) => {
           console.warn("Facebook OCR cache:", error.message.split("\n")[0]);
@@ -152,5 +159,20 @@ export function createFacebookCaseIndex({
     await task;
   }
 
-  return { forAlbums, stop };
+  async function rebuild(albums) {
+    const urls = [
+      ...new Set(
+        albums.flatMap((album) => album.images.map((image) => image.url)),
+      ),
+    ].filter((url) => imageUrl.test(url));
+    await Promise.all(urls.map(queueImage));
+    start();
+    while (task) await task;
+    return {
+      total: urls.length,
+      checked: urls.filter((url) => entries.get(url).index).length,
+    };
+  }
+
+  return { forAlbums, rebuild, stop };
 }

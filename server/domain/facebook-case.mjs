@@ -1,3 +1,5 @@
+export const facebookCaseVersion = 2;
+
 const normalize = (text) =>
   text
     .normalize("NFKC")
@@ -9,7 +11,7 @@ export function facebookCaseNumber(caseNumber) {
   const parts = normalize(caseNumber || "").match(
     /^([\p{L}]+)(\d+)\/(\d{4})$/u,
   );
-  return parts ? `${parts[1].replace(/E$/, "")}${parts[2]}/${parts[3]}` : null;
+  return parts ? `${parts[1]}${parts[2]}/${parts[3]}` : null;
 }
 
 export function findFacebookCaseBoxes(index, caseNumber) {
@@ -45,7 +47,7 @@ export function indexFacebookCases(lines, width, height) {
         Math.max(...symbols.map((b) => b.y1)) + 2,
       );
       if (right > left && bottom > top) {
-        const key = `${photoPrefix.replace(/E$/, "")}${photoNumber}/${photoYear}`;
+        const key = `${photoPrefix}${photoNumber}/${photoYear}`;
         (matches[key] ||= []).push({
           x: left / width,
           y: top / height,

@@ -1,6 +1,10 @@
 # Land Radar work checkpoint
 
-Updated 2026-11-13. Read live `/api/sync` before doing more work; do not duplicate an active run or query LandsMaps before `geoRetryAt`.
+Updated 2026-11-23. Read live `/api/sync` before doing more work; do not duplicate an active run or query LandsMaps before `geoRetryAt`.
+
+- Facebook case matching now preserves E as a significant part of the prefix. OCR version 2 rebuilt all 429 images currently in the shared library. Removed 132 obsolete OCR indexes and stale match metadata in four saved properties, with an ignored local backup. Comparison against previously indexed photos changed matches for three properties. A hash audit verified that all 641 property identities, original case numbers and user notes were preserved. All 1,425 source/component records retain their case numbers from the original announcement text.
+- The app rebuilds missing or outdated OCR indexes from shared originals at startup with three bounded OCR batches. Property reads show only version 2 matches. All available images have been processed, while 25 Facebook albums remain partially downloaded by the existing public source adapter.
+- Verification for the case-prefix correction passed 76 tests and the React production build. Current migration audit is in ignored `server/data/facebook-case-repair-result.json`. The following entries retain the earlier 2026-11-13 sync history.
 
 - Carried mortgage pricing was migrated from stored announcements for all 140 auctions, including 22 with carried mortgage. The migration preserved the original source fields, evidence and user notes. Internal price filters use the full appraisal plus the stated carried mortgage, matching the map and property cards. Property details apply 10/20/30% to the appraisal only and show the fixed debt separately. The real listing with debt 640,242.67 and appraisal 371,586 showed 1,011,828.67 on the map and in details. Browser filtering excluded it at 1,000,000 and included it at 1,011,828.67.
 

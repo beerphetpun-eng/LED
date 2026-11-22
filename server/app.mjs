@@ -14,6 +14,7 @@ import { createEvidenceStore } from "./infrastructure/evidence-store.mjs";
 import { loadGeography } from "./infrastructure/geography-source.mjs";
 import { createFacebookSource } from "./infrastructure/facebook-source.mjs";
 import { createFacebookCaseIndex } from "./infrastructure/facebook-case-index.mjs";
+import { facebookCaseVersion } from "./domain/facebook-case.mjs";
 const remoteAccess = await readFile(
   new URL("./data/remote-access.json", import.meta.url),
   "utf8",
@@ -36,8 +37,9 @@ const sync = createSyncService({
 await sync.init();
 const facebookCases = createFacebookCaseIndex({
   evidencePath,
-  read: (url) => db.getState("facebook_cases_v1:" + url),
-  write: (url, index) => db.setState("facebook_cases_v1:" + url, index),
+  read: (url) => db.getState(`facebook_cases_v${facebookCaseVersion}:` + url),
+  write: (url, index) =>
+    db.setState(`facebook_cases_v${facebookCaseVersion}:` + url, index),
 });
 const facebook = createFacebookSource(evidencePath, {
   caseIndex: facebookCases,
@@ -57,6 +59,17 @@ const facebook = createFacebookSource(evidencePath, {
     };
   },
 });
+const sharedAlbums = await db.getState("facebook_public_posts", { albums: [] });
+void facebookCases
+  .rebuild(sharedAlbums.albums || [])
+  .then(({ total, checked }) => {
+    console.log(
+      `Facebook case index v${facebookCaseVersion}: ${checked}/${total} images`,
+    );
+  })
+  .catch((error) => {
+    console.warn("Facebook case index:", error.message.split("\n")[0]);
+  });
 const app = createCatalogHttp({
   repository: db,
   sync,
