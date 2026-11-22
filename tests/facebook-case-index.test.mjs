@@ -32,7 +32,7 @@ test("shared pictures are scanned once and only a matching case can see each pic
   assert.equal(waitingA.caseFilter.status, "scanning");
   assert.deepEqual(waitingB.posts, []);
   finish([
-    { column: { "ผบ4958/68": [box] } },
+    { column: { "ผบE4958/68": [box] } },
     { fullPage: { "พ1854/63": [box] } },
   ]);
   await new Promise((resolve) => setImmediate(resolve));
@@ -70,6 +70,35 @@ test("shared pictures are scanned once and only a matching case can see each pic
     write: async () => assert.fail("already indexed"),
     recognize: async () => assert.fail("already indexed"),
   });
-  assert.deepEqual(await restarted.forAlbums(albums, "ผบ4958/2568"), first);
+  assert.deepEqual(await restarted.forAlbums(albums, "ผบE4958/2568"), first);
+  const otherPrefix = await restarted.forAlbums(albums, "ผบ4958/2568");
+  assert.deepEqual(otherPrefix.posts, []);
   await restarted.stop();
+});
+
+test("rebuilding ignores the old cache that discarded E and caches every shared photo", async () => {
+  const saved = new Map();
+  const index = createFacebookCaseIndex({
+    evidencePath: ".",
+    read: async () => ({ column: { "ผบ1066/60": [box] } }),
+    write: async (url, data) => saved.set(url, data),
+    recognize: async () => [
+      { column: { "ผบE1066/60": [box] } },
+      { column: { "ผบ1066/60": [box] } },
+    ],
+  });
+  const albums = [{ expectedPhotos: 2, images: photos }];
+  assert.deepEqual(await index.rebuild(albums), { total: 2, checked: 2 });
+  assert.equal(saved.get(photos[0].url).version, 2);
+  const plain = await index.forAlbums(albums, "ผบ.1066/2560");
+  const electronic = await index.forAlbums(albums, "ผบE.1066/2560");
+  assert.deepEqual(
+    plain.posts[0].images.map((image) => image.photoId),
+    ["2"],
+  );
+  assert.deepEqual(
+    electronic.posts[0].images.map((image) => image.photoId),
+    ["1"],
+  );
+  await index.stop();
 });

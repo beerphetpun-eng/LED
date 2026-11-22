@@ -18,11 +18,12 @@ test("matches Thai digits and short Buddhist years without matching another case
   assert.deepEqual(caseBoxes(lines, "ผบ.594/2560", 100, 100), []);
 });
 
-test("matches the same case with or without a trailing E in the prefix", () => {
+test("preserves E as part of the case prefix while normalizing punctuation and Buddhist years", () => {
   const bbox = { x0: 10, y0: 20, x1: 65, y1: 35 };
   for (const [target, examples] of [
-    ["พ.1854 / 2563", ["พ1854/63", "พ.1854/63", "พE1854/63"]],
-    ["ผบ.1066 / 2560", ["ผบ1066/60", "ผบ.1066/60", "ผบE1066/60"]],
+    ["พ.1854 / 2563", ["พ1854/63", "พ.1854/63"]],
+    ["ผบ.1066 / 2560", ["ผบ1066/60", "ผบ.1066/60"]],
+    ["ผบE.1066 / 2560", ["ผบE1066/60", "ผบ.E1066/60", "ผบe.1066/2560"]],
   ]) {
     for (const text of examples)
       assert.equal(
@@ -30,6 +31,16 @@ test("matches the same case with or without a trailing E in the prefix", () => {
         1,
       );
   }
+  for (const [target, text] of [
+    ["ผบ.1066/2560", "ผบE1066/60"],
+    ["ผบE.1066/2560", "ผบ1066/60"],
+    ["พ.1854/2563", "พE1854/63"],
+    ["พE.1854/2563", "พ1854/63"],
+  ])
+    assert.deepEqual(
+      caseBoxes([{ words: [{ text, bbox }] }], target, 100, 100),
+      [],
+    );
   assert.deepEqual(
     caseBoxes(
       [{ words: [{ text: "พE1066/60", bbox }] }],
