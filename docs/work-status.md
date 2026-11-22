@@ -2,6 +2,14 @@
 
 Updated 2026-11-23. Read live `/api/sync` before doing more work; do not duplicate an active run or query LandsMaps before `geoRetryAt`.
 
+## Agent continuation loop
+
+- Active long task: none. The case-prefix correction and full shared-image reindex are complete.
+- The standing `land-radar` heartbeat was deleted and deletion verified on 2026-11-23 at the user's request. Agent continuation is enabled only for a specific authorized long task. At its start, record the task, completion criteria, progress, next action, automation ID and any usage-limit timestamp here, and enable a 302-minute heartbeat. Delete it and close the checkpoint when the task finishes or is cancelled.
+- The application continues its own LED, LandsMaps and Facebook schedules.
+
+## Completed work
+
 - Facebook case matching now preserves E as a significant part of the prefix. OCR version 2 rebuilt all 429 images currently in the shared library. Removed 132 obsolete OCR indexes and stale match metadata in four saved properties, with an ignored local backup. Comparison against previously indexed photos changed matches for three properties. A hash audit verified that all 641 property identities, original case numbers and user notes were preserved. All 1,425 source/component records retain their case numbers from the original announcement text.
 - The app rebuilds missing or outdated OCR indexes from shared originals at startup with three bounded OCR batches. Property reads show only version 2 matches. All available images have been processed, while 25 Facebook albums remain partially downloaded by the existing public source adapter.
 - Verification for the case-prefix correction passed 76 tests and the React production build. Current migration audit is in ignored `server/data/facebook-case-repair-result.json`. The following entries retain the earlier 2026-11-13 sync history.
@@ -16,5 +24,5 @@ Updated 2026-11-23. Read live `/api/sync` before doing more work; do not duplica
 - Cooldown began 2026-11-13 08:18:43 UTC; initial next attempt is 2026-11-13 13:20:43 UTC (20:20 Bangkok). Always prefer live state over this timestamp. The app resumes when due while open, pauses again if the daily quota is still exhausted, and keeps the weekly LED schedule independent.
 - Latest checks: 37 unit/adapter tests passed, PostgreSQL component/upsert/user-annotation smoke passed, React production build and feature CI passed. Live LED verification and the restart/cooldown UI passed. Live LandsMaps positive smoke is blocked by its daily quota; do not rerun before cooldown. Repeat code checks only when new changes or failures justify them.
 - Local API: http://127.0.0.1:5080; mutations require X-Land-Radar: 1. Launch with `node launch.mjs --no-browser`; Node is under `C:\Program Files\nodejs`.
-- Codex thread heartbeat land-radar runs every 302 minutes and has fired successfully. It is a continuation fallback; do not start duplicate syncs while the app is running a job or has a future cooldown. No Codex usage limit has been observed.
+- Historical monitoring heartbeat `land-radar` ran every 302 minutes from 2026-11-13 and was deleted on 2026-11-23. Its replacement follows the task-scoped continuation policy above.
 - The automatic LandsMaps retry progressed to 18/111 properties before reaching its daily limit again. The latest evidence audit found 57 located parcels with both evidence views and no missing files among 341 references. The next retry is scheduled for 2026-11-13 18:37:03 UTC (01:37 Bangkok on 14 November). Read live state before doing any further collection. The six unavailable photos await repair by LED and are retried by the regular sync. Diagnostics, backups and retrieved personal data in ignored server/data must never enter Git.
