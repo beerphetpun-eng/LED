@@ -62,6 +62,22 @@ export type FacebookLibraryStatus = {
   partial: number;
   photos: number;
   warnings: string[];
+  progress?: { message: string; targetDate: string | null } | null;
+};
+export type FacebookLibraryData = FacebookLibraryStatus & {
+  groups: {
+    date: string | null;
+    properties: number;
+    available: boolean;
+    awaitingAnnouncement: boolean;
+    checkedAt: string | null;
+    posts: (Omit<FacebookResult["posts"][number], "match"> & {
+      albumKey: string;
+      kind: "result" | "announcement" | null;
+      eligible: boolean;
+      complete: boolean;
+    })[];
+  }[];
 };
 export type Property = {
   id: string;

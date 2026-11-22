@@ -78,6 +78,8 @@ test("shared sync fills an album once and two properties read the same files wit
     },
   });
   try {
+    const started = await source.start();
+    assert.equal(started.running, true);
     const first = await source.refresh();
     assert.equal(first.total, 1);
     assert.equal(first.partial, 1);
@@ -87,6 +89,10 @@ test("shared sync fills an album once and two properties read the same files wit
     assert.equal(complete.photos, 2);
     await source.refresh();
     assert.equal(downloads, 2);
+    const checkedAt = index.checkedAt;
+    await source.refresh(true, "2020-10-29");
+    assert.equal(index.checkedAt, checkedAt);
+    assert.ok(index.discovery["2020-10-29"].checkedAt);
     const before = visits;
     const propertyA = await source.forProperty({
       auctionDates: ["29/10/2563"],
@@ -112,7 +118,7 @@ test("public feed extraction keeps post text and observed photo links together",
   try {
     const page = await browser.newPage();
     await page.setContent(`<main>
-   <article><div><div>Wednesday 11 November 2026 at 17:47</div><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">1d</a></div><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><p data-ad-comet-preview="message">ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
+   <article><div><div>Wednesday 11 November 2026 at 17:47</div><a href="https://web.facebook.com/ledcm2/posts/one?ref=feed">1d</a></div><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><p data-ad-comet-preview="message">ขายทอดตลาดทรัพย์ วันที่ 12 พฤศจิกายน 2569</p><div><a href="https://web.facebook.com/ledcm2/posts/one">duplicate</a></div><a href="https://web.facebook.com/photo?fbid=123&set=pcb.1">photo one</a></article>
    <article><a href="https://web.facebook.com/ledcm2/posts/two">yesterday</a><p>ขายทอดตลาดทรัพย์ วันที่ 5 พฤศจิกายน 2569</p><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2">photo two</a><a href="https://web.facebook.com/photo/?fbid=457&set=pcb.2" aria-label="15 remaining items">more</a><a href="https://web.facebook.com/photo/?fbid=456&set=pcb.2&ref=extra">duplicate</a></article>
    <article><div><div>Monday 16 November 2026 at 09:00</div><a href="https://web.facebook.com/ledcm2/posts/other">today</a></div><p>ข่าวประชาสัมพันธ์… See more</p></article>
   </main>`);
@@ -154,6 +160,55 @@ test("identifies the requested public album when Facebook changes its timestamp 
     );
     assert.match(album.text, /5 พฤศจิกายน/);
     assert.match(album.photoUrls[0], /fbid=222/);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("public post metadata restores full captions and exact photo counts without mixing another album", async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    const story = (post_id, id, text) => ({
+      post_id,
+      creation_time: Date.parse("2026-11-09T09:39:00Z") / 1000,
+      message: { text },
+      attachments: [
+        {
+          all_subattachments: {
+            count: 2,
+            nodes: [id, String(Number(id) + 1)].map((id) => ({
+              media: { __typename: "Photo", id },
+            })),
+          },
+        },
+      ],
+    });
+    await page.setContent(`
+      <script type="application/json">${JSON.stringify([
+        story(
+          "900",
+          "123",
+          "ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 5 พฤศจิกายน 2569",
+        ),
+        story(
+          "901",
+          "999",
+          "ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 12 พฤศจิกายน 2569",
+        ),
+      ])}</script>
+      <article><a href="https://web.facebook.com/ledcm2/posts/one">today</a>
+      <p data-ad-preview="message">ผลการขายทอดตลาดทรัพย์… See more</p>
+      <a href="https://web.facebook.com/photo/?fbid=123&amp;set=pcb.900">+3</a></article>
+    `);
+    const posts = await readFacebookPosts(page);
+    assert.equal(posts[0].publishedOn, "2026-11-09");
+    assert.match(posts[0].text, /5 พฤศจิกายน 2569/);
+    assert.equal(posts[0].photoCountVerified, true);
+    assert.equal(posts[0].expectedPhotos, 2);
+    assert.equal(posts[0].photoUrls.length, 2);
+    assert.ok(posts[0].photoUrls.every((url) => url.includes("set=pcb.900")));
+    assert.ok(posts[0].photoUrls.every((url) => !url.includes("fbid=999")));
   } finally {
     await browser.close();
   }

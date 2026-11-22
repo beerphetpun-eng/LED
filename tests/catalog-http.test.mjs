@@ -77,10 +77,11 @@ test("property views use shared Facebook albums and only the library endpoint ca
         sharedReads++;
         return { posts: [{ images: [{ url: "/evidence/fb-1-shared.jpg" }] }] };
       },
-      refresh: async () => {
+      start: async () => {
         refreshes++;
         return { photos: 1 };
       },
+      library: async () => ({ groups: [{ date: "2026-11-05" }] }),
     },
     root: process.cwd(),
     evidencePath: process.cwd(),
@@ -107,6 +108,16 @@ test("property views use shared Facebook albums and only the library endpoint ca
     headers,
   });
   assert.deepEqual(await refreshed.json(), { photos: 1 });
+  assert.equal(refreshed.status, 202);
+  assert.equal(refreshes, 1);
+  const library = await fetch(base + "/facebook/library");
+  assert.deepEqual((await library.json()).groups, [{ date: "2026-11-05" }]);
+  const invalid = await fetch(base + "/facebook/library/refresh", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ date: "2026-02-30" }),
+  });
+  assert.equal(invalid.status, 400);
   assert.equal(refreshes, 1);
 });
 
