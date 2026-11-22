@@ -5,7 +5,9 @@ import {
   facebookPublishedDay,
   isFacebookAuctionCaption,
   selectFacebookPosts,
+  facebookPostDetails,
 } from "../domain/catalog.mjs";
+import { facebookLibraryGroups } from "../domain/facebook-library.mjs";
 import {
   downloadFacebookAlbum,
   existingFacebookImages,
@@ -63,6 +65,73 @@ export async function navigateFacebookPhoto(page, current, direction = "next") {
     }
   }
   return { advanced: false, loginRequired };
+}
+
+export async function readFacebookMetadata(page) {
+  return page
+    .locator('script[type="application/json"]')
+    .evaluateAll((scripts) => {
+      const posts = new Map();
+      const attachments = (value, result) => {
+        if (!value || typeof value !== "object") return;
+        const gallery = value.all_subattachments;
+        if (gallery) {
+          if (Number.isSafeInteger(gallery.count) && gallery.count > 0)
+            result.counts.add(gallery.count);
+          for (const item of gallery.nodes || []) {
+            if (
+              /^\d+$/.test(item.media?.id || "") &&
+              (!item.media.__typename || item.media.__typename === "Photo")
+            )
+              result.photos.add(item.media.id);
+          }
+        }
+        for (const child of Object.values(value))
+          if (child && typeof child === "object") attachments(child, result);
+      };
+      const walk = (value) => {
+        if (!value || typeof value !== "object") return;
+        if (/^\d+$/.test(value.post_id || "")) {
+          const id = value.post_id;
+          const post = posts.get(id) || {
+            id,
+            text: "",
+            created: null,
+            counts: new Set(),
+            photos: new Set(),
+          };
+          if (
+            typeof value.message?.text === "string" &&
+            value.message.text.length > post.text.length
+          )
+            post.text = value.message.text;
+          if (Number.isFinite(value.creation_time) && value.creation_time > 0)
+            post.created = value.creation_time;
+          if (value.attachments) attachments(value.attachments, post);
+          posts.set(id, post);
+        }
+        for (const child of Object.values(value))
+          if (child && typeof child === "object") walk(child);
+      };
+      for (const script of scripts) {
+        try {
+          walk(JSON.parse(script.textContent));
+        } catch {
+          /* Other embedded data may be incomplete. */
+        }
+      }
+      return [...posts.values()].map((post) => ({
+        id: post.id,
+        text: post.text,
+        publishedOn: post.created
+          ? new Date(post.created * 1000 + 7 * 3600000)
+              .toISOString()
+              .slice(0, 10)
+          : null,
+        expectedPhotos: post.counts.size === 1 ? [...post.counts][0] : null,
+        photos: [...post.photos],
+      }));
+    });
 }
 
 export async function readFacebookPosts(page, includeReferences = false) {
@@ -138,10 +207,41 @@ export async function readFacebookPosts(page, includeReferences = false) {
       }
       return result;
     }, includeReferences);
-  return posts.map(({ publicationLabel, ...post }) => ({
-    ...post,
-    publishedOn: facebookPublishedDay(publicationLabel),
-  }));
+  const metadata = new Map(
+    (await readFacebookMetadata(page)).map((post) => [post.id, post]),
+  );
+  const found = new Map();
+  rememberPosts(
+    found,
+    posts.map(({ publicationLabel, ...post }) => {
+      const album =
+        post.photoUrls[0] && new URL(post.photoUrls[0]).searchParams.get("set");
+      const data = metadata.get(album?.replace(/^pcb\./, ""));
+      return {
+        ...post,
+        ...(album && { albumKey: album }),
+        text: data?.text || post.text,
+        publishedOn:
+          data?.publishedOn || facebookPublishedDay(publicationLabel),
+        ...(data?.expectedPhotos && {
+          expectedPhotos: data.expectedPhotos,
+          photoCountVerified: true,
+        }),
+        photoUrls: [
+          ...new Set([
+            ...post.photoUrls.map((url) => {
+              const link = new URL(url);
+              return `https://web.facebook.com/photo/?fbid=${link.searchParams.get("fbid")}&set=${link.searchParams.get("set")}`;
+            }),
+            ...(data?.photos || []).map(
+              (id) => `https://web.facebook.com/photo/?fbid=${id}&set=${album}`,
+            ),
+          ]),
+        ],
+      };
+    }),
+  );
+  return [...found.values()];
 }
 
 export async function readFacebookPermalink(page, url) {
@@ -169,7 +269,19 @@ export async function readFacebookPermalink(page, url) {
 function rememberPosts(found, posts) {
   for (const post of posts) {
     if (!postUrl.test(post.url)) continue;
-    if (post.text || !found.get(post.url)?.text) found.set(post.url, post);
+    const previous = found.get(post.url);
+    found.set(post.url, {
+      ...previous,
+      ...post,
+      text:
+        (previous?.text?.length || 0) > (post.text?.length || 0)
+          ? previous.text
+          : post.text,
+      publishedOn: post.publishedOn || previous?.publishedOn || null,
+      photoUrls: [
+        ...new Set([...(previous?.photoUrls || []), ...(post.photoUrls || [])]),
+      ],
+    });
   }
 }
 
@@ -177,6 +289,10 @@ async function collectPublicPosts(page, found, maxScrolls, stableLimit = 5) {
   let unchanged = 0;
   let limited = false;
   for (let scroll = 0; scroll <= maxScrolls; scroll++) {
+    const more = page.getByRole("button", { name: /^(See more|ดูเพิ่มเติม)$/ });
+    for (const button of await more.all())
+      if (await button.isVisible())
+        await button.click({ timeout: 1500 }).catch(() => {});
     const before = found.size;
     rememberPosts(found, await readFacebookPosts(page, true));
     const gate = page
@@ -201,8 +317,17 @@ export function nextFacebookArchiveLink(posts, auctionDates, checked) {
   const days = auctionDates.map(Date.parse);
   const distance = (day) =>
     Math.min(...days.map((date) => Math.abs(date - Date.parse(day))));
-  return [...posts]
-    .filter((p) => postUrl.test(p.url) && !checked.has(p.url) && p.publishedOn)
+  const unique = new Map(
+    posts.map((post) => [post.albumKey || post.url, post]),
+  );
+  return [...unique.values()]
+    .filter(
+      (p) =>
+        postUrl.test(p.url) &&
+        !checked.has(p.url) &&
+        !checked.has(p.albumKey) &&
+        p.publishedOn,
+    )
     .sort((a, b) => distance(a.publishedOn) - distance(b.publishedOn))[0]?.url;
 }
 
@@ -242,6 +367,7 @@ export function createFacebookSource(
     timer,
     browser,
     stopping = false;
+  let progress = null;
   const feedOptions = {
     locale: "en-US",
     timezoneId: "Asia/Bangkok",
@@ -249,7 +375,7 @@ export function createFacebookSource(
     acceptDownloads: false,
   };
 
-  async function syncLibrary(force) {
+  async function syncLibrary(force, requestedDate = null) {
     const index = await postIndex.read();
     if (
       !force &&
@@ -268,14 +394,20 @@ export function createFacebookSource(
     );
     const found = new Map();
     const warnings = [];
+    const discovery = index.discovery || {};
     const save = (checkedAt = index.checkedAt) =>
       postIndex.write({
         checkedAt,
         posts: [...references.values()],
         albums: [...albums.values()],
         warnings: [...new Set(warnings)],
+        discovery,
       });
     try {
+      progress = {
+        message: "กำลังอ่านฟีด Facebook",
+        targetDate: requestedDate,
+      };
       browser = await launchBrowser();
       const context = await browser.newContext(feedOptions);
       const page = await context.newPage();
@@ -300,33 +432,51 @@ export function createFacebookSource(
       }
 
       const today = bangkokDay();
-      const recentPast = dates
-        .map(auctionISO)
-        .filter(
-          (date) =>
-            date &&
-            date < today &&
-            Date.parse(today) - Date.parse(date) <= 45 * 86400000,
-        );
-      const covered = new Set(
-        selectFacebookPosts([...albums.values()], dates, today).map(
-          (post) => post.match.date,
+      const recentPast = [
+        ...new Set(
+          dates
+            .map(auctionISO)
+            .filter(
+              (date) =>
+                date &&
+                date < today &&
+                (!requestedDate || date === requestedDate),
+            ),
         ),
+      ];
+      const covered = new Set(
+        selectFacebookPosts(
+          [...albums.values(), ...references.values(), ...found.values()],
+          dates,
+          today,
+        ).map((post) => post.match.date),
       );
       const missingDates = recentPast.filter((date) => !covered.has(date));
-      const visited = new Set();
+      const visited = new Map(
+        missingDates.map((date) => [
+          date,
+          new Set(discovery[date]?.visited || []),
+        ]),
+      );
       for (
         let attempt = 0;
-        attempt < 4 && missingDates.length && !stopping;
+        attempt < 12 && missingDates.length && !stopping;
         attempt++
       ) {
+        const targetDate = missingDates[attempt % missingDates.length];
+        progress = { message: "กำลังค้นโพสต์ย้อนหลัง", targetDate };
+        const checked = visited.get(targetDate);
         const link = nextFacebookArchiveLink(
           [...references.values(), ...found.values()],
-          missingDates,
-          visited,
+          [targetDate],
+          checked,
         );
-        if (!link) break;
-        visited.add(link);
+        if (!link) continue;
+        checked.add(link);
+        const reference = [...references.values(), ...found.values()].find(
+          (post) => post.url === link,
+        );
+        if (reference?.albumKey) checked.add(reference.albumKey);
         try {
           await page.goto(link, {
             waitUntil: "domcontentloaded",
@@ -335,7 +485,15 @@ export function createFacebookSource(
           await dismiss(page);
           await collectPublicPosts(page, found, 5, 2);
         } catch {
-          // Continue with the other public links already collected.
+          warnings.push(
+            "เปิดโพสต์ย้อนหลังบางรายการไม่ได้ ระบบจะตรวจลิงก์อื่นต่อ",
+          );
+        } finally {
+          discovery[targetDate] = {
+            visited: [...checked].slice(-250),
+            checkedAt: new Date().toISOString(),
+          };
+          await save();
         }
       }
 
@@ -364,6 +522,15 @@ export function createFacebookSource(
       const attempted = new Set();
       for (const [url, preview] of candidates) {
         if (stopping) break;
+        if (
+          requestedDate &&
+          facebookPostDetails(preview)?.date !== requestedDate
+        )
+          continue;
+        progress = {
+          message: "กำลังเก็บรูปจากโพสต์",
+          targetDate: facebookPostDetails(preview)?.date || null,
+        };
         let key = albumIdentity(preview);
         let known =
           albums.get(key) || albums.get(references.get(url)?.albumKey);
@@ -417,9 +584,10 @@ export function createFacebookSource(
           ],
           evidencePath,
         );
-        const expectedPhotos =
-          Math.max(post.expectedPhotos || 0, known?.expectedPhotos || 0) ||
-          null;
+        const expectedPhotos = post.photoCountVerified
+          ? post.expectedPhotos
+          : Math.max(post.expectedPhotos || 0, known?.expectedPhotos || 0) ||
+            null;
         if (completeAlbum({ expectedPhotos, images: priorImages })) {
           albums.set(key, {
             albumKey: key,
@@ -427,6 +595,7 @@ export function createFacebookSource(
             text: post.text,
             publishedOn: post.publishedOn,
             expectedPhotos,
+            photoCountVerified: Boolean(post.photoCountVerified),
             downloadedPhotos: priorImages.length,
             images: priorImages,
           });
@@ -449,6 +618,7 @@ export function createFacebookSource(
           text: post.text,
           publishedOn: post.publishedOn,
           expectedPhotos,
+          photoCountVerified: Boolean(post.photoCountVerified),
           downloadedPhotos: images.length,
           images,
         };
@@ -475,10 +645,18 @@ export function createFacebookSource(
           albumKey: albumIdentity(post),
         });
       }
-      if (!stopping) await save(new Date().toISOString());
+      if (!stopping) {
+        if (requestedDate)
+          discovery[requestedDate] = {
+            ...discovery[requestedDate],
+            checkedAt: new Date().toISOString(),
+          };
+        await save(requestedDate ? index.checkedAt : new Date().toISOString());
+      }
     } finally {
       await browser?.close();
       browser = undefined;
+      progress = null;
     }
   }
 
@@ -496,16 +674,46 @@ export function createFacebookSource(
         albums.flatMap((album) => album.images.map((image) => image.photoId)),
       ).size,
       warnings: index.warnings || [],
+      progress,
     };
   }
 
-  async function refresh(force = true) {
+  async function refresh(force = true, date = null) {
     if (!task && !stopping)
-      task = syncLibrary(force).finally(() => {
+      task = syncLibrary(force, date).finally(() => {
         task = undefined;
       });
     await task;
     return status();
+  }
+
+  async function start(date = null) {
+    void refresh(true, date)
+      .catch(async (error) => {
+        const index = await postIndex.read();
+        await postIndex.write({
+          ...index,
+          warnings: [
+            ...new Set([
+              ...(index.warnings || []),
+              error.message.split("\n")[0],
+            ]),
+          ],
+        });
+      })
+      .catch((error) =>
+        console.warn("Facebook library:", error.message.split("\n")[0]),
+      );
+    return status();
+  }
+
+  async function library() {
+    const index = await postIndex.read();
+    const catalog = await readCatalog();
+    return {
+      ...(await status()),
+      groups: facebookLibraryGroups(index, catalog.properties || []),
+    };
   }
 
   async function forProperty(property) {
@@ -540,5 +748,13 @@ export function createFacebookSource(
     await task?.catch(() => {});
   }
 
-  return { status, refresh, forProperty, scheduleIndex, stopIndex };
+  return {
+    status,
+    refresh,
+    start,
+    library,
+    forProperty,
+    scheduleIndex,
+    stopIndex,
+  };
 }

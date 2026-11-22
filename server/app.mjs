@@ -56,6 +56,10 @@ const facebook = createFacebookSource(evidencePath, {
         ),
       ],
       legacy: properties.flatMap((property) => property.facebook?.posts || []),
+      properties: properties.map(({ id, auctionDates }) => ({
+        id,
+        auctionDates,
+      })),
     };
   },
 });

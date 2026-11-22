@@ -1,6 +1,7 @@
 import express from "express";
 import path from "node:path";
 import { createRemoteAccess, restrictHost } from "./remote-access.mjs";
+import { auctionISO } from "../domain/catalog.mjs";
 export function createCatalogHttp({
   repository: db,
   sync,
@@ -122,9 +123,20 @@ export function createCatalogHttp({
     if (!p) throw Error("ไม่พบทรัพย์");
     res.json(await propertyDetails(p));
   });
-  app.post("/api/facebook/library/refresh", async (_req, res) =>
-    res.json(await facebook.refresh()),
+  app.get("/api/facebook/library", async (_req, res) =>
+    res.json(await facebook.library()),
   );
+  app.post("/api/facebook/library/refresh", async (req, res) => {
+    const date = req.body?.date ?? null;
+    if (
+      date !== null &&
+      (typeof date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        auctionISO(date.split("-").reverse().join("/")) !== date)
+    )
+      return res.status(400).json({ error: "วันที่ค้นหาไม่ถูกต้อง" });
+    res.status(202).json(await facebook.start(date));
+  });
   app.use("/api", (req, res) => res.status(404).json({ error: "ไม่พบ API" }));
   app.use("/evidence", express.static(evidencePath, { dotfiles: "deny" }));
   app.use(express.static(path.join(root, "wwwroot")));

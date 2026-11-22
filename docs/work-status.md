@@ -4,7 +4,9 @@ Updated 2026-11-23. Read live `/api/sync` before doing more work; do not duplica
 
 ## Agent continuation loop
 
-- Active long task: none. The case-prefix correction and full shared-image reindex are complete.
+- Active long task (2026-11-23): improve discovery of Facebook auction posts for missing dates and add a dated Facebook library tab within Sync Settings, moving Facebook retrieval controls there.
+- Completion criteria: audit missing dates, test an improved public discovery path against the live page, retrieve newly discoverable relevant posts/photos, show saved albums and missing-date coverage by auction date with retrieval controls in the new tab, verify tests/build/live UI, commit/push/merge, then delete continuation automation `facebook` and close this checkpoint.
+- Progress: implemented on `feat/facebook-date-library`. Live public post metadata verified exact counts and full captions. All 26 saved albums / 429 photos are now verified complete. The caption-date rule restored 2026-11-05 results for 146 properties and 2026-09-10 results for 41 properties. Public archive recovery, a second per-date search for 2026-11-19, and web search still found no eligible results for 2026-10-19, 2026-11-09 or 2026-11-19. The new tab shows these missing dates explicitly. Desktop/mobile Cloudflare UI, actual image decode, per-date HTTP 202 receipts and duplicate-click protection passed. Next actions are final verification, commit/push/merge, delete automation `facebook`, and close this checkpoint. No usage limit recorded.
 - The standing `land-radar` heartbeat was deleted and deletion verified on 2026-11-23 at the user's request. Agent continuation is enabled only for a specific authorized long task. At its start, record the task, completion criteria, progress, next action, automation ID and any usage-limit timestamp here, and enable a 302-minute heartbeat. Delete it and close the checkpoint when the task finishes or is cancelled.
 - The application continues its own LED, LandsMaps and Facebook schedules.
 

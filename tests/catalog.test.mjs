@@ -194,7 +194,7 @@ test("scope settings reject unknown districts and never accept price conditions"
   );
   assert.throws(() => validateSettings({ ...s, scopes: [] }, g));
 });
-test("Facebook accepts only the correct auction type and a publication day on the correct side within three days", () => {
+test("Facebook uses the caption date and auction type even when publication is delayed", () => {
   const dates = ["10/11/2569"];
   const announcement = "✨ บัญชีขายทอดตลาดทรัพย์ วันที่  ๑๐  พฤศจิกายน  ๒๕๖๙";
   const result = "ผลการขายทอดตลาดทรัพย์ ประจำวันที่\u200b 10 พฤศจิกายน 2569";
@@ -211,8 +211,8 @@ test("Facebook accepts only the correct auction type and a publication day on th
       { text: announcement, publishedOn: "2026-11-06" },
       dates,
       "2026-11-08",
-    ),
-    null,
+    )?.kind,
+    "announcement",
   );
   assert.equal(
     matchPost(
@@ -228,8 +228,9 @@ test("Facebook accepts only the correct auction type and a publication day on th
     "result",
   );
   assert.equal(
-    matchPost({ text: result, publishedOn: "2026-11-14" }, dates, "2026-11-15"),
-    null,
+    matchPost({ text: result, publishedOn: "2026-11-14" }, dates, "2026-11-15")
+      ?.kind,
+    "result",
   );
   assert.equal(
     matchPost({ text: result, publishedOn: "2026-11-09" }, dates, "2026-11-11"),
@@ -277,7 +278,7 @@ test("does not reopen Facebook feed links outside the eligible publication dates
   const today = "2026-11-16";
   assert.equal(facebookPublicationRelevant("2026-10-31", dates, today), true);
   assert.equal(facebookPublicationRelevant("2026-11-16", dates, today), true);
-  assert.equal(facebookPublicationRelevant("2026-11-14", dates, today), false);
+  assert.equal(facebookPublicationRelevant("2026-11-14", dates, today), true);
   assert.equal(facebookPublicationRelevant("2026-11-17", dates, today), false);
 });
 
