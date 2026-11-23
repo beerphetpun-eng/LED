@@ -32,7 +32,7 @@ test("shared pictures are scanned once and only a matching case can see each pic
   assert.equal(waitingA.caseFilter.status, "scanning");
   assert.deepEqual(waitingB.posts, []);
   finish([
-    { column: { "ผบE4958/68": [box] } },
+    { column: { "ผบE4958/68": [box] }, rowReview: { unresolved: 2 } },
     { fullPage: { "พ1854/63": [box] } },
   ]);
   await new Promise((resolve) => setImmediate(resolve));
@@ -50,6 +50,11 @@ test("shared pictures are scanned once and only a matching case can see each pic
   const absent = await index.forAlbums(albums, "พ.1854 / 2568");
   assert.deepEqual(absent.posts, []);
   assert.equal(absent.caseFilter.status, "no_match");
+  assert.equal(
+    absent.caseFilter.uncertainRows,
+    2,
+    "a checked photo does not imply that every case cell was readable",
+  );
   const partial = await index.forAlbums(
     [{ ...albums[0], expectedPhotos: 3 }],
     "พ.1854 / 2568",
@@ -89,7 +94,7 @@ test("rebuilding ignores the old cache that discarded E and caches every shared 
   });
   const albums = [{ expectedPhotos: 2, images: photos }];
   assert.deepEqual(await index.rebuild(albums), { total: 2, checked: 2 });
-  assert.equal(saved.get(photos[0].url).version, 3);
+  assert.equal(saved.get(photos[0].url).version, 4);
   const plain = await index.forAlbums(albums, "ผบ.1066/2560");
   const electronic = await index.forAlbums(albums, "ผบE.1066/2560");
   assert.deepEqual(
@@ -101,4 +106,55 @@ test("rebuilding ignores the old cache that discarded E and caches every shared 
     ["1"],
   );
   await index.stop();
+});
+
+test("unreadable images retain a retry state across restart and never become a negative case search", async () => {
+  const saved = new Map();
+  const albums = [{ expectedPhotos: 1, images: [photos[0]] }];
+  let now = 1000,
+    attempts = 0;
+  const options = {
+    evidencePath: ".",
+    read: async (url) => saved.get(url),
+    write: async (url, data) => saved.set(url, data),
+    clock: () => now,
+  };
+  const first = createFacebookCaseIndex({
+    ...options,
+    recognize: async () => {
+      attempts++;
+      return [null];
+    },
+  });
+  assert.deepEqual(await first.rebuild(albums), { total: 1, checked: 0 });
+  assert.equal(saved.get(photos[0].url).status, "unreadable");
+  assert.equal(
+    (await first.forAlbums(albums, "ผบE.6757/2566")).caseFilter.status,
+    "unreadable",
+  );
+  await first.stop();
+  const restarted = createFacebookCaseIndex({
+    ...options,
+    recognize: async () => {
+      attempts++;
+      return [{ column: { ผบE675766: [box] } }];
+    },
+  });
+  assert.equal(
+    (await restarted.forAlbums(albums, "ผบE.6757/2566")).caseFilter.status,
+    "unreadable",
+  );
+  assert.equal(attempts, 1);
+  now += 15 * 60000;
+  assert.equal(
+    (await restarted.forAlbums(albums, "ผบE.6757/2566")).caseFilter.status,
+    "scanning",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    (await restarted.forAlbums(albums, "ผบE.6757/2566")).caseFilter.status,
+    "matched",
+  );
+  assert.equal(attempts, 2);
+  await restarted.stop();
 });

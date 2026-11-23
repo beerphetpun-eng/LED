@@ -4,6 +4,7 @@ import {
   caseBoxes,
   facebookCaseNumber,
   combineFacebookRow,
+  facebookRowConsensus,
 } from "../server/domain/facebook-case.mjs";
 import { filterFacebookImages } from "../server/infrastructure/facebook-image-filter.mjs";
 
@@ -71,20 +72,156 @@ test("colored-row readings require independently observed E after the Thai prefi
     { text, words: [{ symbols, bbox: { x0: 0, x1: 180, y0: 30, y1: 60 } }] },
   ];
   const thai = lines(
-    [make("ผ", 0, 15), make("บ", 16, 30), make("6", 32, 45)],
+    [
+      make("ผ", 0, 15),
+      make("บ", 16, 30),
+      make("6", 32, 45),
+      make("6", 46, 59),
+      make("7", 60, 73),
+      make("0", 74, 87),
+      make("7", 88, 101),
+      make("6", 102, 115),
+      make("7", 116, 129),
+    ],
     "ผบ6670767",
   );
   const english = lines(
-    [make("H", 0, 15), make("U", 16, 30), make("E", 32, 45), make("6", 46, 59)],
+    [
+      make("H", 0, 15),
+      make("U", 16, 30),
+      make("E", 32, 45),
+      make("6", 46, 59),
+      make("T", 60, 73),
+      make("0", 74, 87),
+      make("/", 88, 101),
+      make("6", 102, 115),
+      make("7", 116, 129),
+    ],
     "HUE6T0/67",
   );
-  const numbers = lines([make("E", 0, 45), make("670/67", 46, 180)], "E670/67");
+  const numberSymbols = [
+    make("E", 0, 45),
+    make("6", 46, 59),
+    make("7", 60, 73),
+    make("0", 74, 87),
+    make("/", 88, 101),
+    make("6", 102, 115),
+    make("7", 116, 129),
+  ];
+  const numbers = lines(numberSymbols, "E670/67");
   const joined = combineFacebookRow(thai, english, numbers);
   assert.equal(joined.words[0].text, "ผบE670/67");
   assert.equal(caseBoxes([joined], "ผบE.670/2567", 300, 100).length, 1);
   assert.equal(caseBoxes([joined], "ผบ.670/2567", 300, 100).length, 0);
   const unconfirmed = lines([make("E", 0, 30), make("6", 46, 59)], "E670/67");
   assert.equal(combineFacebookRow(thai, unconfirmed, numbers), null);
+  assert.equal(
+    combineFacebookRow(thai, english, lines(numberSymbols, "E67/67")),
+    null,
+    "a dropped serial digit must not create a different case",
+  );
+  assert.equal(
+    combineFacebookRow(thai, english, lines(numberSymbols, "E670/66")),
+    null,
+    "the year must also agree",
+  );
+  const merged = structuredClone(thai);
+  merged[0].words[0].symbols.splice(2, 2, make("6", 32, 59));
+  assert.equal(
+    combineFacebookRow(merged, english, numbers).words[0].text,
+    "ผบE670/67",
+    "a merged E and first digit still has independent numeric evidence",
+  );
+});
+
+test("ordinary serial numbers starting with 6 never acquire an E", () => {
+  const make = (text, offset = 0) => [
+    {
+      text,
+      words: [
+        {
+          text,
+          symbols: [...text].map((text, i) => ({
+            text,
+            bbox: {
+              x0: offset + i * 12,
+              x1: offset + (i + 1) * 12,
+              y0: 10,
+              y1: 30,
+            },
+          })),
+        },
+      ],
+    },
+  ];
+  const line = combineFacebookRow(
+    make("ผบ6757/66"),
+    make("HU6757/66"),
+    make("6757/66", 24),
+  );
+  assert.equal(line.words[0].text, "ผบ6757/66");
+  assert.deepEqual(caseBoxes([line], "ผบE.6757/2566", 200, 100), []);
+});
+
+test("cell consensus rejects prefix and digit disagreements instead of accepting the first readable result", () => {
+  const line = (text) => ({ words: [{ text }] });
+  const wrong = line("พบE670/67"),
+    correct = line("ผบE670/67");
+  assert.equal(facebookRowConsensus([wrong, correct, null]), null);
+  assert.equal(
+    facebookRowConsensus([wrong, correct, null, line("ผบE.670 / 2567")]),
+    correct,
+  );
+  assert.equal(
+    facebookRowConsensus([line("ผบE6757/66"), line("ผบ6757/66"), null]),
+    null,
+  );
+  assert.equal(
+    facebookRowConsensus([line("ผบE9481/67"), line("ผบE981/67"), null]),
+    null,
+  );
+});
+
+test("a digit swallowed by the constrained slash box cannot disappear from a case number", () => {
+  const line = (text, chars) => [
+    {
+      text,
+      words: [
+        {
+          text,
+          symbols: chars.map(([text, x0, x1]) => ({
+            text,
+            bbox: { x0, x1, y0: 10, y1: 30 },
+          })),
+        },
+      ],
+    },
+  ];
+  const thai = line("มย34/67", [
+    ["ม", 0, 10],
+    ["ย", 10, 20],
+    ["3", 20, 30],
+    ["4", 30, 40],
+    ["/", 40, 50],
+    ["6", 50, 60],
+    ["7", 60, 70],
+  ]);
+  const latin = line("HU3a/67", [
+    ["H", 0, 10],
+    ["U", 10, 20],
+    ["3", 20, 30],
+    ["a", 30, 40],
+    ["/", 40, 50],
+    ["6", 50, 60],
+    ["7", 60, 70],
+  ]);
+  const constrained = line("3/67", [
+    ["3", 0, 30],
+    ["/", 30, 50],
+    ["6", 50, 60],
+    ["7", 60, 70],
+  ]);
+  assert.equal(combineFacebookRow(thai, latin, constrained), null);
 });
 
 test("filters across posts when there is a match and keeps every image otherwise", async () => {

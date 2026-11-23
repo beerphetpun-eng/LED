@@ -4,6 +4,7 @@ import { chromium } from "../server/node_modules/playwright/index.mjs";
 import { imageSize } from "../server/node_modules/image-size/dist/esm/index.js";
 import {
   createFacebookOcrInput,
+  facebookTableLines,
   restoreFacebookColumnBoxes,
 } from "../server/infrastructure/facebook-ocr-input.mjs";
 
@@ -49,6 +50,68 @@ test("OCR isolates green table rows and maps enlarged case boxes back to the ori
       y1: 45,
     });
     assert.deepEqual(lines[0].words[0].symbols[0].bbox, lines[0].words[0].bbox);
+  } finally {
+    await input.close();
+    await browser.close();
+  }
+});
+
+test("table OCR separates white, shaded and dark green cells without treating the background as a grid line", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const input = await createFacebookOcrInput();
+  try {
+    const page = await browser.newPage();
+    const encoded = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 160;
+      canvas.height = 150;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "white";
+      context.fillRect(0, 0, 160, 150);
+      context.fillStyle = "#dddddd";
+      context.fillRect(20, 50, 120, 40);
+      context.fillStyle = "rgb(30,80,20)";
+      context.fillRect(20, 90, 120, 40);
+      context.fillStyle = "black";
+      for (const y of [10, 50, 90, 130]) context.fillRect(20, y, 120, 2);
+      return canvas.toDataURL("image/png").split(",")[1];
+    });
+    const table = await input.table(Buffer.from(encoded, "base64"), {
+      left: 25,
+      top: 5,
+      width: 100,
+      height: 135,
+    });
+    assert.equal(table.rows.length, 3);
+    for (const [i, row] of table.rows.entries()) {
+      assert(row.top < 30 + i * 40 && row.top + row.height > 30 + i * 40);
+    }
+    const second = table.rows[1];
+    const make = (text, offset) => ({
+      text,
+      words: [
+        {
+          text,
+          bbox: { x0: 30, x1: 60, y0: offset + 35, y1: offset + 55 },
+          symbols: [
+            {
+              text,
+              bbox: { x0: 30, x1: 60, y0: offset + 35, y1: offset + 55 },
+            },
+          ],
+        },
+      ],
+    });
+    const lines = [
+      make("1", table.rows[0].offset),
+      make("2", second.offset),
+      make("3", table.rows[2].offset),
+    ];
+    const selected = facebookTableLines(lines, second);
+    assert.equal(selected.length, 1);
+    assert.equal(selected[0].text, "2");
+    assert.equal(selected[0].words[0].symbols[0].bbox.y0, 35);
+    assert.equal(lines[1].words[0].symbols[0].bbox.y0, second.offset + 35);
   } finally {
     await input.close();
     await browser.close();

@@ -14,6 +14,7 @@ export function createFacebookCaseIndex({
   read,
   write,
   recognize = recognizeFacebookCases,
+  clock = () => Date.now(),
 }) {
   const entries = new Map();
   const queue = new Set();
@@ -44,7 +45,16 @@ export function createFacebookCaseIndex({
         entry.pending = false;
         entry.index = index || null;
         if (!index) {
-          entry.retryAt = Date.now() + retryDelay;
+          entry.retryAt = clock() + retryDelay;
+          try {
+            await write(url, {
+              version: facebookCaseVersion,
+              status: "unreadable",
+              retryAt: entry.retryAt,
+            });
+          } catch (error) {
+            console.warn("Facebook OCR cache:", error.message.split("\n")[0]);
+          }
           continue;
         }
         try {
@@ -75,7 +85,16 @@ export function createFacebookCaseIndex({
       entries.set(url, entry);
       entry.loaded = read(url)
         .then((saved) => {
-          entry.index = saved?.version === facebookCaseVersion ? saved : null;
+          entry.index =
+            saved?.version === facebookCaseVersion &&
+            saved.status !== "unreadable"
+              ? saved
+              : null;
+          if (
+            saved?.version === facebookCaseVersion &&
+            saved.status === "unreadable"
+          )
+            entry.retryAt = saved.retryAt || 0;
         })
         .catch((error) => {
           console.warn("Facebook OCR cache:", error.message.split("\n")[0]);
@@ -85,7 +104,7 @@ export function createFacebookCaseIndex({
     if (
       !entry.index &&
       !entry.pending &&
-      entry.retryAt <= Date.now() &&
+      entry.retryAt <= clock() &&
       !abort.signal.aborted
     ) {
       entry.pending = true;
@@ -112,6 +131,7 @@ export function createFacebookCaseIndex({
       checked: 0,
       matched: 0,
       unreadable: 0,
+      uncertainRows: 0,
       incomplete,
     };
     if (!facebookCaseNumber(caseNumber))
@@ -127,6 +147,7 @@ export function createFacebookCaseIndex({
       pending ||= entry.pending;
       if (!entry.index) continue;
       counts.checked++;
+      counts.uncertainRows += entry.index.rowReview?.unresolved || 0;
       const boxes = findFacebookCaseBoxes(entry.index, caseNumber);
       if (boxes.length) matches.set(url, boxes);
     }

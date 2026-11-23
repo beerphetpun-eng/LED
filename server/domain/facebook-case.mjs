@@ -1,4 +1,4 @@
-export const facebookCaseVersion = 3;
+export const facebookCaseVersion = 4;
 
 const normalize = (text) =>
   text
@@ -31,7 +31,11 @@ export function findFacebookCaseBoxes(index, caseNumber) {
 export function combineFacebookRow(thaiLines, latinLines, numberLines) {
   const symbolsOf = (lines) =>
     lines
-      .flatMap((line) => line.words.flatMap((word) => word.symbols || [word]))
+      .flatMap((line) =>
+        line.words.flatMap((word) =>
+          word.symbols?.length ? word.symbols : [word],
+        ),
+      )
       .filter((symbol) => normalize(symbol.text));
   const thai = [];
   for (const symbol of symbolsOf(thaiLines)) {
@@ -46,13 +50,30 @@ export function combineFacebookRow(thaiLines, latinLines, numberLines) {
   const firstNumber = latin.find(
     (symbol) => /^\d$/.test(symbol.text) && symbol.bbox.x0 >= right - 3,
   );
-  const electronic = latin.some(
+  const electronic = latin.find(
     (symbol) =>
       symbol.text.toUpperCase() === "E" &&
       symbol.bbox.x0 >= right - 3 &&
       (!firstNumber || symbol.bbox.x0 < firstNumber.bbox.x0),
   );
-  if (suffix.startsWith("E") !== electronic) return null;
+  if (suffix.startsWith("E") !== Boolean(electronic)) return null;
+  // A constrained digit reader may drop a digit or turn a Thai letter into one.
+  // Require the mixed-language reading to independently contain the same digits.
+  // Locate the slash geometrically: it can resemble a 7 in the mixed reading.
+  const slash = latin.find((symbol) => symbol.text === "/");
+  const boundary = electronic ? electronic.bbox.x1 : right;
+  const corroborated = symbolsOf(thaiLines)
+    .filter((symbol) => symbol.bbox.x1 > boundary + 3)
+    .filter(
+      (symbol) =>
+        !slash ||
+        (symbol.bbox.x0 + symbol.bbox.x1) / 2 < slash.bbox.x0 ||
+        (symbol.bbox.x0 + symbol.bbox.x1) / 2 > slash.bbox.x1,
+    )
+    .map((symbol) => normalize(symbol.text))
+    .join("")
+    .replace(/[^0-9]/g, "");
+  if (corroborated !== suffix.replace(/[^0-9]/g, "")) return null;
   const text = thai.map((symbol) => normalize(symbol.text)).join("") + suffix;
   if (!facebookCaseNumber(text)) return null;
   const boxes = [...thai, ...symbolsOf(numberLines)].map(
@@ -71,6 +92,17 @@ export function combineFacebookRow(thaiLines, latinLines, numberLines) {
       },
     ],
   };
+}
+
+export function facebookRowConsensus(lines) {
+  const key = (line) => (line ? facebookCaseNumber(line.words[0].text) : null);
+  return (
+    lines.find(
+      (candidate) =>
+        key(candidate) &&
+        lines.filter((line) => key(line) === key(candidate)).length >= 2,
+    ) || null
+  );
 }
 
 export function indexFacebookCases(lines, width, height) {
