@@ -37,6 +37,7 @@ export type FacebookResult = {
     total: number;
     matched: number;
     unreadable: number;
+    uncertainRows?: number;
     incomplete: number;
   };
   posts: {

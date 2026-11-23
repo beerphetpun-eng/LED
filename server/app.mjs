@@ -15,6 +15,7 @@ import { loadGeography } from "./infrastructure/geography-source.mjs";
 import { createFacebookSource } from "./infrastructure/facebook-source.mjs";
 import { createFacebookCaseIndex } from "./infrastructure/facebook-case-index.mjs";
 import { facebookCaseVersion } from "./domain/facebook-case.mjs";
+import { createFacebookCaseReview } from "./application/facebook-case-review.mjs";
 const remoteAccess = await readFile(
   new URL("./data/remote-access.json", import.meta.url),
   "utf8",
@@ -79,6 +80,7 @@ const app = createCatalogHttp({
   sync,
   geography,
   facebook,
+  caseReview: createFacebookCaseReview({ repository: db }),
   root,
   evidencePath,
   remoteAccess,

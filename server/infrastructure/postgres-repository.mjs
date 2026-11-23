@@ -92,6 +92,18 @@ export async function getState(key, fallback = null) {
       .rows[0]?.data ?? fallback
   );
 }
+export async function facebookCaseIndexes(version) {
+  const prefix = `facebook_cases_v${version}:`;
+  const { rows } = await pool.query(
+    "SELECT key,data FROM land_radar.state WHERE key LIKE $1",
+    [prefix + "%"],
+  );
+  return new Map(
+    rows
+      .filter((row) => row.data?.version === version)
+      .map((row) => [row.key.slice(prefix.length), row.data]),
+  );
+}
 export async function setState(key, data) {
   await pool.query(
     "INSERT INTO land_radar.state(key,data) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET data=EXCLUDED.data",

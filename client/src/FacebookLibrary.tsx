@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
 import { api, time } from "./catalog-api";
+import { FacebookCaseReview } from "./FacebookCaseReview";
 import type {
   FacebookLibraryStatus,
   FacebookLibraryData,
@@ -18,10 +19,12 @@ export function FacebookLibrary({
   status,
   onRefresh,
   onImage,
+  onProperty,
 }: {
   status: FacebookLibraryStatus;
   onRefresh: (date?: string) => Promise<void>;
   onImage: (url: string) => void;
+  onProperty: (id: string) => Promise<void>;
 }) {
   const [data, setData] = useState<FacebookLibraryData | null>(null);
   const [filter, setFilter] = useState("saved");
@@ -121,6 +124,7 @@ export function FacebookLibrary({
           {warning}
         </p>
       ))}
+      <FacebookCaseReview revision={status.checkedAt} onProperty={onProperty} />
       <label className="facebook-library-filter">
         แสดงวันที่
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>

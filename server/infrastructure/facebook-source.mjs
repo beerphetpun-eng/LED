@@ -652,6 +652,12 @@ export function createFacebookSource(
             checkedAt: new Date().toISOString(),
           };
         await save(requestedDate ? index.checkedAt : new Date().toISOString());
+        // Index each new shared photo for every property, without waiting for a details view.
+        void caseIndex
+          ?.rebuild?.([...albums.values()])
+          .catch((error) =>
+            console.warn("Facebook case index:", error.message.split("\n")[0]),
+          );
       }
     } finally {
       await browser?.close();

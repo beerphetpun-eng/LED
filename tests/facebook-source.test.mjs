@@ -39,8 +39,16 @@ test("shared sync fills an album once and two properties read the same files wit
   let index = { posts: [] };
   let visits = 0;
   let downloads = 0;
+  const indexed = [];
   const source = createFacebookSource(directory, {
     maxScrolls: 0,
+    caseIndex: {
+      rebuild: async (albums) =>
+        indexed.push(
+          albums.flatMap((album) => album.images.map((image) => image.url)),
+        ),
+      forAlbums: async (posts) => ({ posts }),
+    },
     postIndex: {
       read: async () => index,
       write: async (data) => {
@@ -87,6 +95,11 @@ test("shared sync fills an album once and two properties read the same files wit
     const complete = await source.refresh();
     assert.equal(complete.complete, 1);
     assert.equal(complete.photos, 2);
+    assert(indexed.some((photos) => photos.length === 1));
+    assert(
+      indexed.some((photos) => photos.length === 2),
+      "new shared images are indexed without opening a property",
+    );
     await source.refresh();
     assert.equal(downloads, 2);
     const checkedAt = index.checkedAt;

@@ -7,6 +7,7 @@ export function createCatalogHttp({
   sync,
   geography,
   facebook,
+  caseReview,
   root,
   evidencePath,
   remoteAccess,
@@ -47,6 +48,7 @@ export function createCatalogHttp({
       facebookPublicIndex: true,
       facebookSharedAlbums: true,
       facebookCaseFilter: true,
+      facebookCaseReview: true,
       deedRefresh: true,
     };
     try {
@@ -128,6 +130,9 @@ export function createCatalogHttp({
   });
   app.get("/api/facebook/library", async (_req, res) =>
     res.json(await facebook.library()),
+  );
+  app.get("/api/facebook/cases/review", async (_req, res) =>
+    res.json(await caseReview()),
   );
   app.post("/api/facebook/library/refresh", async (req, res) => {
     const date = req.body?.date ?? null;

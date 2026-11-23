@@ -258,7 +258,7 @@ function App() {
     setSelected(null);
     setHighlightedPin(null);
   }
-  async function select(p: Property, focusMap = true) {
+  async function select(p: Pick<Property, "id">, focusMap = true) {
     const request = ++selectionRequest.current;
     await report("กำลังอ่านรายละเอียด", async () => {
       const d = await api<Property>("/properties/" + p.id);
@@ -492,6 +492,10 @@ function App() {
                   status={sync.facebookLibrary}
                   onRefresh={refreshFacebookLibrary}
                   onImage={(url) => setImage({ url })}
+                  onProperty={async (id) => {
+                    setTab("explore");
+                    await select({ id }, false);
+                  }}
                 />
               )}
             </div>

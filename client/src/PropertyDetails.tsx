@@ -553,8 +553,8 @@ export function PropertyDetails({
                   )}
                   {facebookFilter.status === "no_match" && (
                     <p>
-                      ไม่พบเลขคดี {p.caseNumber} ใน {facebookFilter.checked}{" "}
-                      รูปที่ตรวจแล้ว
+                      ยังจับคู่เลขคดี {p.caseNumber} ไม่ได้จาก{" "}
+                      {facebookFilter.checked} รูปที่อ่านด้วย OCR
                     </p>
                   )}
                   {facebookFilter.status === "no_case" && (
@@ -572,6 +572,14 @@ export function PropertyDetails({
                       จะลองตรวจอีกครั้ง
                     </p>
                   )}
+                  {facebookFilter.status === "no_match" &&
+                    Boolean(facebookFilter.uncertainRows) && (
+                      <p className="muted">
+                        ภาพที่เกี่ยวข้องยังมีช่องเลขคดีอ่านไม่ชัด
+                        จึงยังยืนยันไม่ได้ว่าไม่มีเลขคดีนี้ในตาราง
+                        ตรวจรูปต้นฉบับได้ในคลัง Facebook
+                      </p>
+                    )}
                 </div>
               )}
               {facebookPosts.map((post) => (

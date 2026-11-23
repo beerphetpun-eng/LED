@@ -452,6 +452,38 @@ a {
   align-items: center;
   margin-block: 18px;
 }
+.facebook-case-review {
+  border: 1px solid #d4decd;
+  border-radius: 10px;
+  margin-block: 18px;
+}
+.facebook-case-review > summary {
+  padding: 12px;
+  font-weight: 600;
+}
+.case-review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.case-review-controls > label {
+  flex: 1 1 180px;
+}
+.case-review-list {
+  max-height: 420px;
+  overflow: auto;
+}
+.case-review-list > article {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  border-top: 1px solid #e1e5da;
+  padding-block: 12px;
+}
+.case-review-list p {
+  margin-bottom: 4px;
+}
 .facebook-date-group {
   border-top: 1px solid #d4decd;
 }
@@ -1357,6 +1389,11 @@ footer {
   }
 }
 @media (max-width: 700px) {
+  .facebook-library .section-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
   .topbar {
     height: 64px;
     padding: 8px 12px;

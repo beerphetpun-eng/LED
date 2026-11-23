@@ -25,6 +25,30 @@ function send(url, headers, method = "GET", body) {
   });
 }
 
+test("the full case review is read-only and uses the dedicated review use case", async (t) => {
+  let calls = 0;
+  const report = { version: 4, summary: { total: 2, matched: 1 }, items: [] };
+  const app = createCatalogHttp({
+    repository: {},
+    caseReview: async () => {
+      calls++;
+      return report;
+    },
+    root: process.cwd(),
+    evidencePath: process.cwd(),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/facebook/cases/review`,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), report);
+  assert.equal(calls, 1);
+  assert.match(response.headers.get("cache-control"), /no-store/);
+});
+
 test("expiry settings have an independent guarded endpoint", async (t) => {
   const received = [];
   const app = createCatalogHttp({
