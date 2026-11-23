@@ -163,6 +163,67 @@ test("ordinary serial numbers starting with 6 never acquire an E", () => {
   assert.deepEqual(caseBoxes([line], "ผบE.6757/2566", 200, 100), []);
 });
 
+test("an independently observed E can be separated from a Thai-looking glyph without changing the real prefix", () => {
+  const words = (chars) => [
+    {
+      text: chars.map((c) => c[0]).join(""),
+      words: [
+        {
+          symbols: chars.map(([text, x0, x1]) => ({
+            text,
+            bbox: { x0, x1, y0: 10, y1: 30 },
+          })),
+        },
+      ],
+    },
+  ];
+  const thai = words([
+    ["ผ", 0, 15],
+    ["บ", 16, 30],
+    ["อ", 35, 47],
+    ["1", 52, 60],
+    ["4", 61, 73],
+    ["2", 74, 86],
+    ["4", 87, 99],
+    ["/", 100, 111],
+    ["6", 112, 124],
+    ["5", 125, 137],
+  ]);
+  const latin = words([
+    ["H", 0, 15],
+    ["U", 16, 30],
+    ["E", 35, 49],
+    ["1", 52, 60],
+    ["4", 61, 73],
+    ["2", 74, 86],
+    ["4", 87, 99],
+    ["/", 100, 111],
+    ["6", 112, 124],
+    ["5", 125, 137],
+  ]);
+  const digits = words([
+    ["E", 0, 49],
+    ["1", 52, 60],
+    ["4", 61, 73],
+    ["2", 74, 86],
+    ["4", 87, 99],
+    ["/", 100, 111],
+    ["6", 112, 124],
+    ["5", 125, 137],
+  ]);
+  assert.equal(
+    combineFacebookRow(thai, latin, digits).words[0].text,
+    "ผบE1424/65",
+  );
+  const absent = structuredClone(latin);
+  absent[0].words[0].symbols[2].text = "O";
+  assert.equal(
+    combineFacebookRow(thai, absent, digits),
+    null,
+    "a Thai-looking E is never substituted without independent E recognition",
+  );
+});
+
 test("cell consensus rejects prefix and digit disagreements instead of accepting the first readable result", () => {
   const line = (text) => ({ words: [{ text }] });
   const wrong = line("พบE670/67"),

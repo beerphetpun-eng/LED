@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findFacebookCaseBoxes } from "../domain/facebook-case.mjs";
 
-export async function recognizeFacebookCases(files, signal) {
+export async function recognizeFacebookCases(files, signal, previous = []) {
   const langPath = await mkdtemp(path.join(tmpdir(), "land-radar-ocr-"));
   try {
     return await new Promise((resolve, reject) => {
@@ -28,7 +28,7 @@ export async function recognizeFacebookCases(files, signal) {
         },
       );
       child.stdin.on("error", reject);
-      child.stdin.end(JSON.stringify({ files, langPath }));
+      child.stdin.end(JSON.stringify({ files, langPath, previous }));
     });
   } finally {
     await rm(langPath, { recursive: true, force: true });

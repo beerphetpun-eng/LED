@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { reviewFacebookCases } from "../server/domain/facebook-case-review.mjs";
 import { createFacebookCaseReview } from "../server/application/facebook-case-review.mjs";
+import { facebookCaseVersion } from "../server/domain/facebook-case.mjs";
 const image = "/evidence/fb-1-shared.jpg";
 const album = {
   text: "ผลการขายทอดตลาดทรัพย์ ประจำวันที่ 5 พฤศจิกายน 2569",
@@ -17,6 +18,31 @@ const property = (
 const indexes = new Map([
   [image, { column: { ผบE675766: [{}] }, rowReview: { unresolved: 7 } }],
 ]);
+
+test("a source discrepancy is visible only for the same property, case and eligible original, never a substitute match", () => {
+  const p = property("different", "ผบE.6586 / 2566");
+  const finding = {
+    propertyId: p.id,
+    caseNumber: p.caseNumber,
+    imageUrl: image,
+    message: "Facebook prints E586, LED has E6586",
+  };
+  const result = reviewFacebookCases([p], [album], indexes, "2026-11-24", [
+    finding,
+  ]);
+  assert.equal(result.items[0].status, "needs_ocr_review");
+  assert.deepEqual(result.items[0].auditNotes, [finding]);
+  for (const other of [
+    { ...p, id: "other" },
+    { ...p, caseNumber: "ผบ.6586 / 2566" },
+    { ...p, auctionDates: ["19/11/2569"] },
+  ])
+    assert.deepEqual(
+      reviewFacebookCases([other], [album], indexes, "2026-11-24", [finding])
+        .items[0].auditNotes,
+      [],
+    );
+});
 
 test("review covers every property and distinguishes OCR misses, missing posts and future auctions", () => {
   const result = reviewFacebookCases(
@@ -96,7 +122,7 @@ test("the review use case only reads the catalog, current OCR version and shared
         return { albums: [album] };
       },
       facebookCaseIndexes: async (version) => {
-        assert.equal(version, 4);
+        assert.equal(version, facebookCaseVersion);
         return indexes;
       },
     },
@@ -105,7 +131,7 @@ test("the review use case only reads the catalog, current OCR version and shared
   const report = await review();
   assert.equal(report.today, "2026-11-24");
   assert.equal(report.summary.matched, 1);
-  assert.equal(report.version, 4);
+  assert.equal(report.version, facebookCaseVersion);
 });
 
 test("missing Chiang Mai posts retain the source office and warn when the announcement sells in Bangkok", () => {

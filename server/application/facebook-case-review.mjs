@@ -5,6 +5,8 @@ import { bangkokDay } from "../domain/catalog.mjs";
 export function createFacebookCaseReview({
   repository,
   clock = () => new Date(),
+  verifyIndexes = async (indexes) => indexes,
+  findings = [],
 }) {
   return async () => {
     const [properties, library, indexes] = await Promise.all([
@@ -17,8 +19,9 @@ export function createFacebookCaseReview({
       ...reviewFacebookCases(
         properties,
         library.albums || [],
-        indexes,
+        await verifyIndexes(indexes),
         bangkokDay(now),
+        findings,
       ),
       checkedAt: now.toISOString(),
       version: facebookCaseVersion,

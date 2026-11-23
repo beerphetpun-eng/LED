@@ -23,6 +23,8 @@ type Review = {
     failedPhotos?: number;
     sourceOffice?: string;
     sourceNotice?: string;
+    auditNotes?: { message: string; imageUrl: string }[];
+    eligiblePosts?: { date: string; url: string }[];
     unreadableRows: number;
     otherDatePhotos: string[];
   }[];
@@ -191,6 +193,30 @@ export function FacebookCaseReview({
                 )}
                 {item.sourceNotice && (
                   <p className="small inline-error">{item.sourceNotice}</p>
+                )}
+                {item.auditNotes?.map((note) => (
+                  <p key={note.imageUrl} className="small inline-error">
+                    {note.message}{" "}
+                    <a href={note.imageUrl} target="_blank" rel="noreferrer">
+                      ดูต้นฉบับ
+                    </a>
+                  </p>
+                ))}
+                {Boolean(item.eligiblePosts?.length) && (
+                  <p className="small">
+                    โพสต์ที่ใช้ตรวจ:{" "}
+                    {item.eligiblePosts!.map((post) => (
+                      <a
+                        key={post.url}
+                        href={post.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {" "}
+                        {post.date}{" "}
+                      </a>
+                    ))}
+                  </p>
                 )}
                 <p className="small">
                   ลำดับ {item.assetSequence} · {labels[item.status]} ·{" "}

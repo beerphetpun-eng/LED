@@ -15,6 +15,7 @@ export function createFacebookCaseIndex({
   write,
   recognize = recognizeFacebookCases,
   clock = () => Date.now(),
+  verify = async (url, index) => index,
 }) {
   const entries = new Map();
   const queue = new Set();
@@ -39,9 +40,10 @@ export function createFacebookCaseIndex({
       for (const [position, url] of urls.entries()) {
         const entry = entries.get(url);
         const recognized = indexes[position];
-        const index = recognized
+        const rawIndex = recognized
           ? { ...recognized, version: facebookCaseVersion }
           : null;
+        const index = rawIndex;
         entry.pending = false;
         entry.index = index || null;
         if (!index) {
@@ -58,7 +60,7 @@ export function createFacebookCaseIndex({
           continue;
         }
         try {
-          await write(url, index);
+          await write(url, rawIndex);
         } catch (error) {
           console.warn("Facebook OCR cache:", error.message.split("\n")[0]);
         }
@@ -132,6 +134,7 @@ export function createFacebookCaseIndex({
       matched: 0,
       unreadable: 0,
       uncertainRows: 0,
+      verified: 0,
       incomplete,
     };
     if (!facebookCaseNumber(caseNumber))
@@ -146,10 +149,20 @@ export function createFacebookCaseIndex({
       const entry = entries.get(url);
       pending ||= entry.pending;
       if (!entry.index) continue;
+      const index = await verify(url, entry.index);
       counts.checked++;
-      counts.uncertainRows += entry.index.rowReview?.unresolved || 0;
-      const boxes = findFacebookCaseBoxes(entry.index, caseNumber);
+      counts.uncertainRows += index.rowReview?.unresolved || 0;
+      const boxes = findFacebookCaseBoxes(index, caseNumber);
       if (boxes.length) matches.set(url, boxes);
+      if (
+        boxes.length &&
+        index.verifiedReadings?.some(
+          (reading) =>
+            facebookCaseNumber(reading.caseNumber) ===
+            facebookCaseNumber(caseNumber),
+        )
+      )
+        counts.verified++;
     }
     counts.matched = matches.size;
     counts.unreadable =

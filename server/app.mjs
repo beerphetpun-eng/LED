@@ -16,6 +16,7 @@ import { createFacebookSource } from "./infrastructure/facebook-source.mjs";
 import { createFacebookCaseIndex } from "./infrastructure/facebook-case-index.mjs";
 import { facebookCaseVersion } from "./domain/facebook-case.mjs";
 import { createFacebookCaseReview } from "./application/facebook-case-review.mjs";
+import { createFacebookVerifiedReadings } from "./infrastructure/facebook-verified-readings.mjs";
 const remoteAccess = await readFile(
   new URL("./data/remote-access.json", import.meta.url),
   "utf8",
@@ -36,8 +37,17 @@ const sync = createSyncService({
   geography,
 });
 await sync.init();
+const caseAudit = await db.getState("facebook_verified_case_readings", {
+  images: {},
+  findings: [],
+});
+const verifiedCases = createFacebookVerifiedReadings({
+  evidencePath,
+  records: caseAudit.images,
+});
 const facebookCases = createFacebookCaseIndex({
   evidencePath,
+  verify: verifiedCases.verify,
   read: (url) => db.getState(`facebook_cases_v${facebookCaseVersion}:` + url),
   write: (url, index) =>
     db.setState(`facebook_cases_v${facebookCaseVersion}:` + url, index),
@@ -80,7 +90,11 @@ const app = createCatalogHttp({
   sync,
   geography,
   facebook,
-  caseReview: createFacebookCaseReview({ repository: db }),
+  caseReview: createFacebookCaseReview({
+    repository: db,
+    verifyIndexes: verifiedCases.indexes,
+    findings: caseAudit.findings || [],
+  }),
   root,
   evidencePath,
   remoteAccess,

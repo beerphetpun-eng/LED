@@ -27,3 +27,9 @@ The LandsMaps adapter inspects the response to its normal browser form submissio
 HTTP writes require an application header and a recognized local origin. The composition root listens only on loopback and starts the scheduler. Credentials, retrieved records, evidence and build output stay out of Git. Reference geography is public, versioned data; a local cache can replace it without making the UI dependent on a live source form.
 
 Unit tests cover boundaries and application ports. Database smoke verification checks actual upsert and annotation preservation. Live adapter smoke tests are explicit and excluded from CI.
+
+## Facebook case audit and verified evidence
+
+The read-only case review use case classifies every catalog property against caption-date-eligible shared albums. It distinguishes future announcements, missing posts, incomplete albums, pending/unreadable OCR and literal case matches. New album collection automatically starts bounded OCR indexing; failed files retain a restart-safe retry cooldown.
+
+The domain owns literal identifier normalization, contextual consensus, case review classification and verified-cell replacement. Infrastructure fits table cell borders and performs separate Thai/English/digit OCR. Versioned raw indexes remain independent of visual review records. The verified-reading adapter checks the current original SHA256 before applying a reviewed literal cell, replacing only that cell and keeping E significant. The composition root injects the same verifier into property reads and the full-catalog audit; source differences are displayed as findings, never guessed matches. Review records contain provenance and original-relative boxes and stay in private database state, outside Git.

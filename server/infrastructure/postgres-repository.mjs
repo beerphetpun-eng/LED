@@ -95,7 +95,7 @@ export async function getState(key, fallback = null) {
 export async function facebookCaseIndexes(version) {
   const prefix = `facebook_cases_v${version}:`;
   const { rows } = await pool.query(
-    "SELECT key,data FROM land_radar.state WHERE key LIKE $1",
+    "SELECT key, (data - 'rowReview') || jsonb_build_object('rowReview', (data->'rowReview') - 'rows') AS data FROM land_radar.state WHERE key LIKE $1",
     [prefix + "%"],
   );
   return new Map(

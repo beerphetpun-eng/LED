@@ -16,8 +16,14 @@ import {
   facebookTableLines,
   restoreFacebookColumnBoxes,
 } from "./facebook-ocr-input.mjs";
+import { createFacebookIdentifierReader } from "./facebook-identifier-reader.mjs";
+import { facebookFieldPrefix } from "../domain/facebook-identifier-fields.mjs";
 
-const { files, langPath } = JSON.parse(await text(process.stdin));
+const {
+  files,
+  langPath,
+  previous = [],
+} = JSON.parse(await text(process.stdin));
 const languages = [thai, english];
 for (const { code, langPath: packagePath } of languages) {
   const file = `${code}.traineddata.gz`;
@@ -32,6 +38,7 @@ const worker = await createWorker(
   { langPath, cacheMethod: "none", errorHandler: () => {} },
 );
 const input = await createFacebookOcrInput();
+const fieldReader = await createFacebookIdentifierReader({ langPath, input });
 const englishWorker = await createWorker("eng", 1, {
   langPath,
   cacheMethod: "none",
@@ -75,19 +82,29 @@ async function recognizeReadings(prepared, mode) {
   );
   return [thai, latin, numbers];
 }
-async function recognizeRow(bytes, rectangle, enhance = true) {
+async function recognizeRow(bytes, rectangle, enhance = true, audit) {
   const prepared = await input.column(bytes, rectangle, enhance);
-  const line = combineFacebookRow(
-    ...(await recognizeReadings(prepared, PSM.SINGLE_LINE)),
-  );
+  const readings = await recognizeReadings(prepared, PSM.SINGLE_LINE);
+  audit?.push({
+    left: rectangle.left,
+    top: rectangle.top,
+    width: rectangle.width,
+    height: rectangle.height,
+    enhance,
+    readings: readings.map((lines) => lines.map((line) => line.text).join("")),
+  });
+  const line = combineFacebookRow(...readings);
   return line;
 }
 const results = [];
 try {
-  for (const file of files) {
+  for (const [fileIndex, file] of files.entries()) {
     try {
       const bytes = await readFile(file);
       const { width, height } = imageSize(bytes);
+      const seed = previous[fileIndex]?.rowReview?.rows
+        ? previous[fileIndex]
+        : null;
       const columnRectangle = {
         left: Math.floor(width * 0.1015),
         top: Math.floor(height * 0.055),
@@ -96,13 +113,12 @@ try {
       };
       let rowLeft = columnRectangle.left - 1;
       let rowWidth = Math.ceil(width * 0.0516);
-      const standardColumn = await recognize(
-        bytes,
-        columnRectangle,
-        PSM.SINGLE_BLOCK,
-      );
+      const standardColumn = seed
+        ? []
+        : await recognize(bytes, columnRectangle, PSM.SINGLE_BLOCK);
       let column = standardColumn;
       if (
+        !seed &&
         !standardColumn.some((line) =>
           line.text.replace(/\s/g, "").includes("เลขคดี"),
         )
@@ -137,9 +153,13 @@ try {
         }
       }
       // Context around the column can disambiguate Thai case prefixes.
-      const fullPage = await recognize(bytes, null, PSM.AUTO);
-      const columnIndex = indexFacebookCases(column, width, height);
-      const fullIndex = indexFacebookCases(fullPage, width, height);
+      const fullPage = seed ? [] : await recognize(bytes, null, PSM.AUTO);
+      const columnIndex = seed
+        ? structuredClone(seed.column || {})
+        : indexFacebookCases(column, width, height);
+      const fullIndex = seed
+        ? structuredClone(seed.fullPage || {})
+        : indexFacebookCases(fullPage, width, height);
       const rowRectangle = {
         ...columnRectangle,
         left: rowLeft,
@@ -150,11 +170,13 @@ try {
         ),
       };
       const scanLeft = Math.floor(width * 0.015);
-      const table = await input.table(bytes, rowRectangle, {
-        ...rowRectangle,
-        left: scanLeft,
-        width: rowRectangle.left + rowRectangle.width - scanLeft,
-      });
+      const table = seed
+        ? null
+        : await input.table(bytes, rowRectangle, {
+            ...rowRectangle,
+            left: scanLeft,
+            width: rowRectangle.left + rowRectangle.width - scanLeft,
+          });
       const readings = table
         ? await recognizeReadings(table.bytes, PSM.SINGLE_BLOCK)
         : [];
@@ -163,14 +185,22 @@ try {
         width: columnRectangle.width - 1,
       });
       const rows =
-        table?.rows ||
+        (seed
+          ? seed.rowReview.rows.map((row) => ({
+              ...rowRectangle,
+              top: row.top,
+              height: row.height,
+              priorCandidate: row.candidate,
+            }))
+          : table?.rows) ||
         coloredRows.map((row) => ({
           ...row,
           top: row.top + 2,
           height: row.height - 4,
         }));
       const review = { detected: 0, confirmed: 0, unresolved: 0, rows: [] };
-      for (const row of rows) {
+      for (const original of rows) {
+        const row = await input.fitCell(bytes, original);
         const cells = readings.map((lines) => facebookTableLines(lines, row));
         const line = cells.length ? combineFacebookRow(...cells) : null;
         const known = Object.values(columnIndex)
@@ -180,28 +210,61 @@ try {
             return center >= row.top && center < row.top + row.height;
           });
         const candidate =
+          original.priorCandidate ||
           known ||
           cells.some((lines) => lines.some((line) => /[0-9]/.test(line.text)));
         const record = {
           top: row.top,
+          left: row.left,
+          width: row.width,
+          fitted: row.fitted,
           height: row.height,
           candidate,
           readings: cells.map((lines) =>
             lines.map((line) => line.text).join(""),
           ),
           caseNumber: null,
+          profiles: [],
         };
         review.rows.push(record);
-        if (table && !candidate) continue;
+        if ((table || seed) && !candidate) continue;
         review.detected++;
-        const cell = await recognizeRow(bytes, row);
+        let field = await fieldReader.read(bytes, row);
+        if (!field.line) {
+          const binary = await fieldReader.read(bytes, row, "binary");
+          const prefix = facebookFieldPrefix(field.trace.prefixSamples);
+          if (
+            prefix !== null &&
+            prefix !== facebookFieldPrefix(binary.trace.prefixSamples)
+          )
+            binary.line = null;
+          record.fields = [field.trace, binary.trace];
+          field = binary;
+        } else record.fields = [field.trace];
+        const cell =
+          field.line || (await recognizeRow(bytes, row, true, record.profiles));
         const key = (line) =>
           line ? facebookCaseNumber(line.words[0].text) : null;
         const votes = [line, cell];
         const rectangles = new Map();
-        if (!key(line) || key(line) !== key(cell))
-          votes.push(await recognizeRow(bytes, row, false));
-        let agreed = facebookRowConsensus(votes);
+        if (line) rectangles.set(line, original);
+        if (!field.line && (!key(line) || key(line) !== key(cell)))
+          votes.push(await recognizeRow(bytes, row, false, record.profiles));
+        let agreed = field.line || facebookRowConsensus(votes);
+        if (!agreed && row.fitted && row.width > 24) {
+          const inset = { ...row, width: row.width - 1 };
+          const recovered = await recognizeRow(
+            bytes,
+            inset,
+            true,
+            record.profiles,
+          );
+          if (recovered) {
+            rectangles.set(recovered, inset);
+            votes.push(recovered);
+            agreed = facebookRowConsensus(votes);
+          }
+        }
         const colored = coloredRows.find(
           (color) =>
             row.top + row.height / 2 >= color.top &&
@@ -222,7 +285,12 @@ try {
               legacy.height === row.height
             )
               continue;
-            const recovered = await recognizeRow(bytes, legacy);
+            const recovered = await recognizeRow(
+              bytes,
+              legacy,
+              true,
+              record.profiles,
+            );
             if (recovered) {
               rectangles.set(recovered, legacy);
               votes.push(recovered);
@@ -278,7 +346,10 @@ try {
           columnIndex[key] = [...(columnIndex[key] || []), ...boxes];
       }
       results.push(
-        column.length || fullPage.length || Object.keys(columnIndex).length
+        seed ||
+          column.length ||
+          fullPage.length ||
+          Object.keys(columnIndex).length
           ? {
               column: columnIndex,
               fullPage: fullIndex,
@@ -293,6 +364,7 @@ try {
   process.stdout.write(JSON.stringify(results));
 } finally {
   await input.close();
+  await fieldReader.close();
   await englishWorker.terminate();
   await worker.terminate();
 }

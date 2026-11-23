@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createFacebookCaseIndex } from "../server/infrastructure/facebook-case-index.mjs";
+import { facebookCaseVersion } from "../server/domain/facebook-case.mjs";
 
 const box = { x: 0.1, y: 0.2, width: 0.3, height: 0.1 };
 const photo = (photoId) => ({
@@ -8,6 +9,48 @@ const photo = (photoId) => ({
   url: `/evidence/fb-${photoId}-shared.jpg`,
 });
 const photos = [photo("1"), photo("2")];
+
+test("verified evidence is applied to reads while the reusable OCR cache remains unmodified", async () => {
+  const raw = { column: { "ผงE5189/67": [box] } };
+  const saved = new Map();
+  let verifications = 0;
+  const options = {
+    evidencePath: ".",
+    read: async (url) => saved.get(url),
+    write: async (url, index) => saved.set(url, index),
+    recognize: async () => [raw],
+    verify: async (url, index) => {
+      verifications++;
+      return {
+        ...index,
+        column: { "ผบE5189/67": [box] },
+        verifiedReadings: [{ caseNumber: "ผบE5189/67" }],
+      };
+    },
+  };
+  const albums = [{ expectedPhotos: 1, images: [photos[0]] }];
+  const index = createFacebookCaseIndex(options);
+  await index.rebuild(albums);
+  const result = await index.forAlbums(albums, "ผบE.5189/2567");
+  assert.equal(result.caseFilter.verified, 1);
+  assert.deepEqual(saved.get(photos[0].url).column, raw.column);
+  assert.equal(
+    saved.get(photos[0].url).verifiedReadings,
+    undefined,
+    "a future changed file must be reverified from its hash, never from a baked-in override",
+  );
+  await index.stop();
+  const restarted = createFacebookCaseIndex({
+    ...options,
+    recognize: async () => assert.fail("cached"),
+  });
+  assert.equal(
+    (await restarted.forAlbums(albums, "ผบE.5189/2567")).caseFilter.verified,
+    1,
+  );
+  assert.equal(verifications, 2);
+  await restarted.stop();
+});
 
 test("shared pictures are scanned once and only a matching case can see each picture", async () => {
   let finish;
@@ -94,7 +137,7 @@ test("rebuilding ignores the old cache that discarded E and caches every shared 
   });
   const albums = [{ expectedPhotos: 2, images: photos }];
   assert.deepEqual(await index.rebuild(albums), { total: 2, checked: 2 });
-  assert.equal(saved.get(photos[0].url).version, 4);
+  assert.equal(saved.get(photos[0].url).version, facebookCaseVersion);
   const plain = await index.forAlbums(albums, "ผบ.1066/2560");
   const electronic = await index.forAlbums(albums, "ผบE.1066/2560");
   assert.deepEqual(

@@ -1,4 +1,4 @@
-export const facebookCaseVersion = 4;
+export const facebookCaseVersion = 6;
 
 const normalize = (text) =>
   text
@@ -37,7 +37,7 @@ export function combineFacebookRow(thaiLines, latinLines, numberLines) {
         ),
       )
       .filter((symbol) => normalize(symbol.text));
-  const thai = [];
+  let thai = [];
   for (const symbol of symbolsOf(thaiLines)) {
     if (!/^[ก-ฮ]+$/.test(normalize(symbol.text))) break;
     thai.push(symbol);
@@ -45,6 +45,20 @@ export function combineFacebookRow(thaiLines, latinLines, numberLines) {
   if (!thai.length) return null;
   const suffix = normalize(numberLines.map((line) => line.text).join(""));
   if (!/^E?\d+(?:\/(?:\d{2}|\d{4}))?$/.test(suffix)) return null;
+  if (suffix.startsWith("E")) {
+    const observed = symbolsOf(latinLines).find(
+      (symbol) =>
+        symbol.text.toUpperCase() === "E" &&
+        thai.some((prefix) => prefix.bbox.x1 <= symbol.bbox.x0 + 3),
+    );
+    // The mixed model can read the printed E as a Thai อ. Its position is
+    // confirmed by both English readers; keep only Thai glyphs before that E.
+    if (observed)
+      thai = thai.filter(
+        (symbol) => (symbol.bbox.x0 + symbol.bbox.x1) / 2 < observed.bbox.x0,
+      );
+    if (!thai.length) return null;
+  }
   const right = Math.max(...thai.map((symbol) => symbol.bbox.x1));
   const latin = symbolsOf(latinLines);
   const firstNumber = latin.find(
@@ -61,12 +75,25 @@ export function combineFacebookRow(thaiLines, latinLines, numberLines) {
   // Require the mixed-language reading to independently contain the same digits.
   // Locate the slash geometrically: it can resemble a 7 in the mixed reading.
   const slash = latin.find((symbol) => symbol.text === "/");
+  const mixed = symbolsOf(thaiLines);
+  const literalSlash = mixed.some((symbol) => symbol.text === "/");
+  const widths = latin
+    .filter((symbol) => /^\d$/.test(symbol.text))
+    .map((symbol) => symbol.bbox.x1 - symbol.bbox.x0)
+    .sort((a, b) => a - b);
+  const slashIsSingleGlyph =
+    slash &&
+    widths.length &&
+    slash.bbox.x1 - slash.bbox.x0 <=
+      widths[Math.floor(widths.length / 2)] * 1.5;
   const boundary = electronic ? electronic.bbox.x1 : right;
-  const corroborated = symbolsOf(thaiLines)
-    .filter((symbol) => symbol.bbox.x1 > boundary + 3)
+  const corroborated = mixed
+    .filter((symbol) => (symbol.bbox.x0 + symbol.bbox.x1) / 2 >= boundary - 1)
     .filter(
       (symbol) =>
-        !slash ||
+        literalSlash ||
+        symbol.text !== "7" ||
+        !slashIsSingleGlyph ||
         (symbol.bbox.x0 + symbol.bbox.x1) / 2 < slash.bbox.x0 ||
         (symbol.bbox.x0 + symbol.bbox.x1) / 2 > slash.bbox.x1,
     )

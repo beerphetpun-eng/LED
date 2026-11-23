@@ -551,6 +551,13 @@ export function PropertyDetails({
                       พบเลขคดี {p.caseNumber} ใน {facebookFilter.matched} รูป
                     </p>
                   )}
+                  {Boolean(facebookFilter.verified) && (
+                    <p className="muted">
+                      ตรวจเลขคดีกับภาพต้นฉบับโดยตรงแล้ว{" "}
+                      {facebookFilter.verified} รูป ·
+                      เก็บผลตรวจผูกกับไฟล์ต้นฉบับ
+                    </p>
+                  )}
                   {facebookFilter.status === "no_match" && (
                     <p>
                       ยังจับคู่เลขคดี {p.caseNumber} ไม่ได้จาก{" "}

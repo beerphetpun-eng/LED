@@ -4,6 +4,96 @@ export async function createFacebookOcrInput() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const input = {
+    async fitCell(bytes, rectangle) {
+      return page.evaluate(
+        async ({ encoded, rectangle }) => {
+          const image = new Image();
+          image.src = "data:image/jpeg;base64," + encoded;
+          await image.decode();
+          const left = Math.max(0, rectangle.left - 14),
+            top = Math.max(0, rectangle.top - 6);
+          const right = Math.min(
+              image.width,
+              rectangle.left + rectangle.width + 14,
+            ),
+            bottom = Math.min(
+              image.height,
+              rectangle.top + rectangle.height + 6,
+            );
+          const canvas = document.createElement("canvas");
+          canvas.width = right - left;
+          canvas.height = bottom - top;
+          const context = canvas.getContext("2d");
+          context.drawImage(
+            image,
+            left,
+            top,
+            canvas.width,
+            canvas.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          const { data } = context.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          const thresholds = [];
+          for (let y = 0; y < canvas.height; y++) {
+            const green = [];
+            for (let x = 0; x < canvas.width; x++)
+              green.push(data[(y * canvas.width + x) * 4 + 1]);
+            green.sort((a, b) => a - b);
+            thresholds.push(
+              Math.min(140, green[Math.floor(green.length * 0.75)] * 0.65),
+            );
+          }
+          const borders = [];
+          for (let x = 1; x < canvas.width - 1; x++) {
+            let dark = 0;
+            for (let y = 0; y < canvas.height; y++)
+              if (
+                [-1, 0, 1].some(
+                  (dx) =>
+                    data[(y * canvas.width + x + dx) * 4 + 1] < thresholds[y],
+                )
+              )
+                dark++;
+            if (dark < canvas.height * 0.8) continue;
+            const band = borders.at(-1);
+            if (band && x - band.end <= 2) band.end = x;
+            else borders.push({ start: x, end: x });
+          }
+          const nearest = (expected) =>
+            borders
+              .filter(
+                (b) => Math.abs(left + (b.start + b.end) / 2 - expected) <= 12,
+              )
+              .sort(
+                (a, b) =>
+                  Math.abs(left + (a.start + a.end) / 2 - expected) -
+                  Math.abs(left + (b.start + b.end) / 2 - expected),
+              )[0];
+          const start = nearest(rectangle.left),
+            end = nearest(rectangle.left + rectangle.width);
+          if (!start || !end || start === end)
+            return { ...rectangle, fitted: false };
+          const width = end.start - start.end - 1;
+          if (width < rectangle.width * 0.75 || width > rectangle.width * 1.35)
+            return { ...rectangle, fitted: false };
+          return {
+            ...rectangle,
+            left: left + start.end + 1,
+            width,
+            fitted: true,
+          };
+        },
+        { encoded: bytes.toString("base64"), rectangle },
+      );
+    },
     async table(bytes, rectangle, scan = rectangle) {
       const rows = await input.tableRows(bytes, rectangle, scan);
       if (!rows.length) return null;
@@ -200,14 +290,19 @@ export async function createFacebookOcrInput() {
             const background = green[Math.floor(green.length * 0.75)];
             for (let x = 0; x < canvas.width; x++) {
               const offset = (y * canvas.width + x) * 4;
-              const value = Math.max(
-                0,
-                Math.min(
-                  255,
-                  ((pixels.data[offset + 1] - background * 0.5) * 510) /
-                    Math.max(background, 1),
-                ),
-              );
+              const value =
+                enhance === "binary"
+                  ? pixels.data[offset + 1] < background * 0.78
+                    ? 0
+                    : 255
+                  : Math.max(
+                      0,
+                      Math.min(
+                        255,
+                        ((pixels.data[offset + 1] - background * 0.5) * 510) /
+                          Math.max(background, 1),
+                      ),
+                    );
               pixels.data[offset] = value;
               pixels.data[offset + 1] = value;
               pixels.data[offset + 2] = value;

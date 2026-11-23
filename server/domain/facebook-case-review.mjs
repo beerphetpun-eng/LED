@@ -6,6 +6,7 @@ export function reviewFacebookCases(
   albums,
   indexes,
   today = bangkokDay(),
+  findings = [],
 ) {
   const allImages = [
     ...new Set(
@@ -81,6 +82,12 @@ export function reviewFacebookCases(
       caseNumber: property.caseNumber,
       assetSequence: property.assetSequence,
       sourceOffice,
+      auditNotes: findings.filter(
+        (finding) =>
+          finding.propertyId === property.id &&
+          finding.caseNumber === property.caseNumber &&
+          images.includes(finding.imageUrl),
+      ),
       sourceNotice:
         sourceOffice &&
         !sourceOffice.includes("เชียงใหม่") &&
@@ -90,6 +97,9 @@ export function reviewFacebookCases(
       status,
       auctionDates: property.auctionDates || [],
       postDates: [...new Set(posts.map((post) => post.match.date))],
+      eligiblePosts: posts
+        .filter((post) => post.url)
+        .map((post) => ({ date: post.match.date, url: post.url })),
       eligiblePhotos: images.length,
       matchedPhotos: matches,
       pendingPhotos: pending,

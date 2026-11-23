@@ -18,6 +18,9 @@ const pipelineFiles = [
   "server/domain/facebook-case.mjs",
   "server/infrastructure/facebook-ocr-worker.mjs",
   "server/infrastructure/facebook-ocr-input.mjs",
+  "server/infrastructure/facebook-image-filter.mjs",
+  "server/domain/facebook-identifier-fields.mjs",
+  "server/infrastructure/facebook-identifier-reader.mjs",
 ];
 async function fingerprint() {
   const hash = createHash("sha256");

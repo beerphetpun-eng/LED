@@ -74,6 +74,7 @@ test("table OCR separates white, shaded and dark green cells without treating th
       context.fillRect(20, 90, 120, 40);
       context.fillStyle = "black";
       for (const y of [10, 50, 90, 130]) context.fillRect(20, y, 120, 2);
+      for (const x of [20, 140]) context.fillRect(x, 10, 2, 122);
       return canvas.toDataURL("image/png").split(",")[1];
     });
     const table = await input.table(Buffer.from(encoded, "base64"), {
@@ -83,6 +84,18 @@ test("table OCR separates white, shaded and dark green cells without treating th
       height: 135,
     });
     assert.equal(table.rows.length, 3);
+    const fitted = await input.fitCell(Buffer.from(encoded, "base64"), {
+      left: 24,
+      top: 55,
+      width: 110,
+      height: 25,
+    });
+    assert.equal(fitted.fitted, true);
+    assert(fitted.left >= 22 && fitted.left <= 24);
+    assert(
+      fitted.left + fitted.width >= 138 && fitted.left + fitted.width <= 140,
+      "the final digit fits inside the detected right border",
+    );
     for (const [i, row] of table.rows.entries()) {
       assert(row.top < 30 + i * 40 && row.top + row.height > 30 + i * 40);
     }

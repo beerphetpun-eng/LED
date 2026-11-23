@@ -38,6 +38,7 @@ export type FacebookResult = {
     matched: number;
     unreadable: number;
     uncertainRows?: number;
+    verified?: number;
     incomplete: number;
   };
   posts: {
