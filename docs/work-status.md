@@ -5,7 +5,7 @@ Updated 2026-11-23. Read live `/api/sync` before doing more work; do not duplica
 ## Agent continuation loop
 
 - Active long task: none. Compact case matching, green-row OCR and the requested Sync Settings/mobile interface changes are complete and deployed. Feature commits `739f405` and `c7be5ce` were pushed and merged into main at `265bf3c`. Automation `automation` was deleted and its configuration-file absence verified on 2026-11-23. No usage limit occurred.
-- Verification passed locally: 84 tests, Prettier, production build, all 641 property reads, all 429 OCR originals and public desktop/mobile checks. GitHub feature CI run `45189788073` was still installing Chromium on its runner when the merge completed; do not report it as passed. This external installation wait does not keep an agent continuation loop active. The application's ordinary schedules continue independently.
+- Verification passed locally: 84 tests, Prettier, production build, all 641 property reads, all 429 OCR originals and public desktop/mobile checks. GitHub feature CI run `45189788073` also completed successfully after its prolonged Chromium installation. The application's ordinary schedules continue independently; no agent continuation loop remains.
 - The standing `land-radar` heartbeat was deleted and deletion verified on 2026-11-23 at the user's request. Agent continuation is enabled only for a specific authorized long task. At its start, record the task, completion criteria, progress, next action, automation ID and any usage-limit timestamp here, and enable a 302-minute heartbeat. Delete it and close the checkpoint when the task finishes or is cancelled.
 - The application continues its own LED, LandsMaps and Facebook schedules.
 
