@@ -421,6 +421,24 @@ a {
 }
 .sync-tabs {
   margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.sync-page [role="tabpanel"][hidden] {
+  display: none;
+}
+.sync-operation-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+  margin-block: 24px;
+}
+.sync-operation-stats dt {
+  color: #677363;
+  font-size: 12px;
+}
+.sync-operation-stats dd {
+  margin: 6px 0 0;
+  font-weight: 600;
 }
 .facebook-library {
   background: #fff;
@@ -1340,17 +1358,46 @@ footer {
 }
 @media (max-width: 700px) {
   .topbar {
-    height: auto;
-    padding: 16px;
-    flex-wrap: wrap;
-    gap: 15px;
+    height: 64px;
+    padding: 8px 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
   .brand {
-    font-size: 20px;
+    font-size: 16px;
+    gap: 8px;
+  }
+  .brand small,
+  .topbar nav .menu-label {
+    display: none;
+  }
+  .brand-symbol {
+    padding: 8px;
+    border-radius: 10px;
   }
   .topbar nav {
-    width: 100%;
+    width: auto;
+    margin-inline-start: auto;
+    gap: 4px;
     justify-content: center;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+  .topbar nav button {
+    width: 40px;
+    height: 40px;
+    padding: 10px;
+    justify-content: center;
+  }
+  .alert-menu > button {
+    position: relative;
+  }
+  .topbar .alert-count {
+    position: absolute;
+    top: -3px;
+    right: -2px;
+    padding: 1px 4px;
+    font-size: 9px;
   }
   .topbar nav {
     position: relative;
@@ -1370,6 +1417,30 @@ footer {
   .explorer {
     display: flex;
     flex-direction: column;
+    position: relative;
+  }
+  .explorer:not(.filters-collapsed) .filters {
+    position: absolute;
+    inset: 0;
+    z-index: 900;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    align-content: start;
+    grid-template-columns: 1fr;
+  }
+  .explorer:not(.filters-collapsed) .results {
+    visibility: hidden;
+  }
+  .explorer:not(.filters-collapsed) .filter-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: white;
+  }
+  .sync-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
   .filters {
     padding: 24px 20px;
@@ -1440,5 +1511,10 @@ footer {
   }
   .lightbox {
     padding: 65px 10px 20px;
+  }
+}
+@media (max-width: 360px) {
+  .brand > span:last-child {
+    display: none;
   }
 }

@@ -33,6 +33,7 @@ import { api, mapParcels, money, time } from "./catalog-api";
 import { approximateLocation, mapLocationLabel } from "./approximate-location";
 import { PropertyMarkers, type PropertyPin } from "./PropertyMarkers";
 import { SyncPanel } from "./SyncPanel";
+import { GeocodingPanel, RetentionPanel } from "./SyncOperations";
 import { PropertyDetails } from "./PropertyDetails";
 import { EvidenceImage } from "./EvidenceImage";
 import { AlertMenu } from "./AlertMenu";
@@ -393,18 +394,22 @@ function App() {
         </a>
         <nav>
           <button
+            aria-label="สำรวจทรัพย์"
+            title="สำรวจทรัพย์"
             className={tab === "explore" ? "active" : ""}
             onClick={() => setTab("explore")}
           >
             <MapPin size={16} />
-            สำรวจทรัพย์
+            <span className="menu-label">สำรวจทรัพย์</span>
           </button>
           <button
+            aria-label="ตั้งค่าซิงค์"
+            title="ตั้งค่าซิงค์"
             className={tab === "sync" ? "active" : ""}
             onClick={() => setTab("sync")}
           >
             <SettingsIcon size={16} />
-            ตั้งค่าซิงค์
+            <span className="menu-label">ตั้งค่าซิงค์</span>
           </button>
           <AlertMenu
             alerts={sync?.alerts || []}
@@ -417,8 +422,14 @@ function App() {
               })
             }
           />
-          <button onClick={exportJSON} disabled={!library.items.length}>
-            <ArrowDownToLine size={15} /> ส่งออก JSON
+          <button
+            aria-label="ส่งออก JSON"
+            title="ส่งออก JSON"
+            onClick={exportJSON}
+            disabled={!library.items.length}
+          >
+            <ArrowDownToLine size={15} />{" "}
+            <span className="menu-label">ส่งออก JSON</span>
           </button>
         </nav>
         <span className="db-badge">
@@ -443,6 +454,24 @@ function App() {
               ตั้งค่าการซิงค์
             </button>
             <button
+              id="sync-geocode-tab"
+              role="tab"
+              aria-selected={syncTab === "geocode"}
+              aria-controls="sync-geocode-panel"
+              onClick={() => setSyncTab("geocode")}
+            >
+              ค้นพิกัด
+            </button>
+            <button
+              id="sync-retention-tab"
+              role="tab"
+              aria-selected={syncTab === "retention"}
+              aria-controls="sync-retention-panel"
+              onClick={() => setSyncTab("retention")}
+            >
+              ลบข้อมูลหมดอายุ
+            </button>
+            <button
               id="sync-facebook-tab"
               role="tab"
               aria-selected={syncTab === "facebook"}
@@ -452,7 +481,7 @@ function App() {
               คลัง Facebook
             </button>
           </div>
-          {syncTab === "facebook" ? (
+          {syncTab === "facebook" && (
             <div
               id="sync-facebook-panel"
               role="tabpanel"
@@ -466,114 +495,126 @@ function App() {
                 />
               )}
             </div>
-          ) : (
-            <div
-              id="sync-settings-panel"
-              role="tabpanel"
-              aria-labelledby="sync-settings-tab"
-            >
-              <section className="sync-strip">
-                <div>
-                  <span
-                    className={
-                      sync?.runtime.running
-                        ? "status-dot pulsing"
-                        : "status-dot"
+          )}
+          <div
+            hidden={syncTab !== "settings"}
+            id="sync-settings-panel"
+            role="tabpanel"
+            aria-labelledby="sync-settings-tab"
+          >
+            <section className="sync-strip">
+              <div>
+                <span
+                  className={
+                    sync?.runtime.running ? "status-dot pulsing" : "status-dot"
+                  }
+                />
+                <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
+                <small>
+                  {sync?.runtime.running
+                    ? sync.runtime.status === "geocoding"
+                      ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
+                      : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
+                    : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
+                </small>
+              </div>
+              <div className="sync-actions">
+                {sync?.runtime.running ? (
+                  <button
+                    onClick={() =>
+                      act("กำลังหยุด", async () => {
+                        await api("/sync/cancel", "POST");
+                        await loadSync();
+                      })
                     }
-                  />
-                  <strong>{sync?.runtime.message || "กำลังโหลดสถานะ"}</strong>
-                  <small>
-                    {sync?.runtime.running
-                      ? sync.runtime.status === "geocoding"
-                        ? `ค้นพิกัดแล้ว ${sync.runtime.geoDone || 0}/${sync.runtime.geoTotal || 0} ประกาศ`
-                        : `ขอบเขต ${sync.runtime.scopeIndex || 0}/${sync.runtime.scopeCount || 0} · ${sync.runtime.seen || 0} แถว · ${sync.runtime.pages || 0} หน้า · ข้ามรายการเดิม ${sync.runtime.skippedExisting || 0}`
-                      : `ซิงค์อัตโนมัติ ${sync?.settings.enabled ? "เปิด" : "ปิด"} · รอบถัดไป ${time(sync?.runtime.nextRunAt)}`}
-                  </small>
-                  {(sync?.runtime.geoRetryAt || sync?.runtime.nextGeoRunAt) && (
-                    <small>
-                      {sync.runtime.geoRetryAt &&
-                        sync.runtime.status !== "waiting_limit" &&
-                        sync.runtime.quotaMessage &&
-                        `${sync.runtime.quotaMessage} · `}
-                      {sync.settings.enabled
-                        ? "รอบค้นพิกัดถัดไป"
-                        : "ปิดการค้นพิกัดอัตโนมัติ"}
-                      {sync.settings.enabled &&
-                        ` ${time(sync.runtime.geoRetryAt || sync.runtime.nextGeoRunAt)}`}
-                    </small>
-                  )}
-                </div>
-                <div className="sync-actions">
-                  {sync?.runtime.running ? (
+                  >
+                    หยุดซิงค์
+                  </button>
+                ) : (
+                  <>
                     <button
+                      disabled={!!busy || !sync}
                       onClick={() =>
-                        act("กำลังหยุด", async () => {
-                          await api("/sync/cancel", "POST");
+                        act("เริ่มซิงค์", async () => {
+                          await api("/sync/start", "POST");
                           await loadSync();
                         })
                       }
                     >
-                      หยุดซิงค์
+                      <RefreshCw size={15} />
+                      ซิงค์ด้วยตนเอง
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        disabled={!!busy || !sync}
-                        onClick={() =>
-                          act("เริ่มซิงค์", async () => {
-                            await api("/sync/start", "POST");
-                            await loadSync();
-                          })
-                        }
-                      >
-                        <RefreshCw size={15} />
-                        ซิงค์ด้วยตนเอง
-                      </button>
-                      <button
-                        disabled={
-                          !!busy ||
-                          !library.total ||
-                          !!(
-                            sync?.runtime.geoRetryAt &&
-                            Date.parse(sync.runtime.geoRetryAt) > Date.now()
-                          )
-                        }
-                        onClick={() =>
-                          act("ค้นพิกัด", async () => {
-                            await api("/sync/geocode", "POST");
-                            await loadSync();
-                          })
-                        }
-                      >
-                        ค้นพิกัดที่ยังขาด
-                      </button>
-                    </>
-                  )}
-                </div>
-              </section>
-              {sync && geography.length > 0 ? (
-                <SyncPanel
-                  provinces={geography}
-                  initial={sync.settings}
-                  disabled={sync.runtime.running}
-                  onSave={(s) =>
-                    report("บันทึกการตั้งค่า", async () => {
-                      await api("/sync/settings", "PUT", s);
-                      await loadSync();
-                    })
-                  }
-                />
-              ) : (
-                <div className="empty">กำลังอ่านรายชื่อจังหวัดและอำเภอ…</div>
-              )}
-              <p className="muted">
-                ระบบทำงานขณะโปรแกรมเปิดอยู่
-                หากปิดเครื่องจะเริ่มตรวจรอบที่ครบกำหนดเมื่อเปิดอีกครั้ง
-                {sync?.lastCleanup &&
-                  ` · ล้างข้อมูลหมดอายุล่าสุด ${sync.lastCleanup.deleted} รายการ (${time(sync.lastCleanup.at)})`}
-              </p>
-            </div>
-          )}
+                  </>
+                )}
+              </div>
+            </section>
+            {sync && geography.length > 0 ? (
+              <SyncPanel
+                provinces={geography}
+                initial={sync.settings}
+                disabled={sync.runtime.running}
+                onSave={(s) =>
+                  report("บันทึกการตั้งค่า", async () => {
+                    await api("/sync/settings", "PUT", {
+                      ...s,
+                      retention: sync.settings.retention,
+                    });
+                    await loadSync();
+                  })
+                }
+              />
+            ) : (
+              <div className="empty">กำลังอ่านรายชื่อจังหวัดและอำเภอ…</div>
+            )}
+            <p className="muted">
+              ระบบทำงานขณะโปรแกรมเปิดอยู่
+              หากปิดเครื่องจะเริ่มตรวจรอบที่ครบกำหนดเมื่อเปิดอีกครั้ง
+            </p>
+          </div>
+          <div
+            id="sync-geocode-panel"
+            role="tabpanel"
+            aria-labelledby="sync-geocode-tab"
+            hidden={syncTab !== "geocode"}
+          >
+            {sync && (
+              <GeocodingPanel
+                sync={sync}
+                busy={!!busy}
+                hasProperties={library.total > 0}
+                onStart={() =>
+                  act("ค้นพิกัด", async () => {
+                    await api("/sync/geocode", "POST");
+                    await loadSync();
+                  })
+                }
+                onCancel={() =>
+                  act("หยุดค้นพิกัด", async () => {
+                    await api("/sync/cancel", "POST");
+                    await loadSync();
+                  })
+                }
+              />
+            )}
+          </div>
+          <div
+            id="sync-retention-panel"
+            role="tabpanel"
+            aria-labelledby="sync-retention-tab"
+            hidden={syncTab !== "retention"}
+          >
+            {sync && (
+              <RetentionPanel
+                sync={sync}
+                onSave={(retention) =>
+                  report("บันทึกการตั้งค่าลบ", async () => {
+                    await api("/sync/retention", "PUT", { retention });
+                    await loadSync();
+                  })
+                }
+              />
+            )}
+          </div>
         </main>
       ) : (
         <main

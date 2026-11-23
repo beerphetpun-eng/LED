@@ -103,6 +103,15 @@ export async function getSettings() {
   return { ...defaults, ...(await getState("sync_settings")) };
 }
 export const saveSettings = (value) => setState("sync_settings", value);
+export async function saveRetention(retention) {
+  await pool.query(
+    "INSERT INTO land_radar.state(key,data) VALUES('sync_settings',$1) ON CONFLICT(key) DO UPDATE SET data=jsonb_set(land_radar.state.data,'{retention}',$2::jsonb)",
+    [
+      JSON.stringify({ ...defaultSettings(), retention }),
+      JSON.stringify(retention),
+    ],
+  );
+}
 export async function alert(message) {
   await pool.query(
     "INSERT INTO land_radar.alerts(message) SELECT $1 WHERE NOT EXISTS(SELECT 1 FROM land_radar.alerts WHERE message=$1 AND resolved=false)",

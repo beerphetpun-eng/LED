@@ -40,11 +40,12 @@ export function AlertMenu({
         ref={trigger}
         className={open ? "active" : ""}
         aria-label={`แจ้งเตือน ${count} รายการ`}
+        title="แจ้งเตือน"
         aria-expanded={open}
         aria-controls="alert-panel"
         onClick={() => setOpen(!open)}
       >
-        <Bell size={16} /> แจ้งเตือน{" "}
+        <Bell size={16} /> <span className="menu-label">แจ้งเตือน</span>{" "}
         <span className="alert-count" aria-live="polite">
           {count}
         </span>

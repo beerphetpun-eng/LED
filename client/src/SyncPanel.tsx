@@ -212,29 +212,6 @@ export function SyncPanel({
             );
           })}
       </div>
-      <section
-        className="retention-section"
-        aria-labelledby="sync-retention-title"
-      >
-        <h2 id="sync-retention-title">การลบข้อมูลหมดอายุ</h2>
-        <label>
-          ข้อยกเว้นการลบข้อมูลหมดอายุ
-          <select
-            value={draft.retention}
-            disabled={controlsDisabled}
-            onChange={(e) => patch({ retention: e.target.value })}
-          >
-            <option value="manual">เก็บเฉพาะที่เลือกห้ามลบอัตโนมัติ</option>
-            <option value="bookmarked">เก็บหากบุ๊กมาร์ก</option>
-            <option value="engaged">เก็บหากมีบุ๊กมาร์ก ดาว หรือคอมเมนต์</option>
-          </select>
-        </label>
-        <div className="info-note">
-          ลบข้อมูลและรูปตั้งแต่วันถัดจากวันประมูลสุดท้ายครบ 1 เดือนปฏิทิน
-          เก็บทรัพย์ที่เลือก “ห้ามลบอัตโนมัติ”
-          และทรัพย์ที่ยังอ่านวันประมูลได้ไม่ครบไว้เสมอ
-        </div>
-      </section>
       <div className="save-bar">
         <span>
           {dirty ? "มีการตั้งค่าที่ยังไม่บันทึก" : "บันทึกการตั้งค่าแล้ว"} ·{" "}
