@@ -17,7 +17,11 @@ import {
   restoreFacebookColumnBoxes,
 } from "./facebook-ocr-input.mjs";
 import { createFacebookIdentifierReader } from "./facebook-identifier-reader.mjs";
-import { facebookFieldPrefix } from "../domain/facebook-identifier-fields.mjs";
+import { facebookFullCellReading } from "../domain/facebook-full-cell.mjs";
+import {
+  facebookFieldPrefix,
+  facebookFieldConsensus,
+} from "../domain/facebook-identifier-fields.mjs";
 
 const {
   files,
@@ -97,6 +101,42 @@ async function recognizeRow(bytes, rectangle, enhance = true, audit) {
   return line;
 }
 const results = [];
+function replayField(trace, row) {
+  const allowEmptyPrefix =
+    trace.prefixSamples?.every((value) => !value.trim()) &&
+    !/[ก-ฮ]/.test(trace.full?.[0] || "") &&
+    trace.numberBounds &&
+    trace.numberBounds.left - row.left <= 6;
+  const text = facebookFieldConsensus({ ...trace, allowEmptyPrefix });
+  return caseLine(text, row);
+}
+function caseLine(text, row, fullCellReading = false) {
+  return text
+    ? {
+        fullCellReading,
+        words: [
+          {
+            text,
+            bbox: {
+              x0: 30,
+              y0: 30,
+              x1: 30 + row.width * 3,
+              y1: 30 + row.height * 3,
+            },
+          },
+        ],
+      }
+    : null;
+}
+function removeRow(index, row, height) {
+  for (const [key, boxes] of Object.entries(index)) {
+    index[key] = boxes.filter((box) => {
+      const y = (box.y + box.height / 2) * height;
+      return y < row.top || y >= row.top + row.height;
+    });
+    if (!index[key].length) delete index[key];
+  }
+}
 try {
   for (const [fileIndex, file] of files.entries()) {
     try {
@@ -191,6 +231,7 @@ try {
               top: row.top,
               height: row.height,
               priorCandidate: row.candidate,
+              priorReview: seed.version === 6 && row.fields ? row : null,
             }))
           : table?.rows) ||
         coloredRows.map((row) => ({
@@ -200,7 +241,59 @@ try {
         }));
       const review = { detected: 0, confirmed: 0, unresolved: 0, rows: [] };
       for (const original of rows) {
-        const row = await input.fitCell(bytes, original);
+        const prior = original.priorReview;
+        if (prior) {
+          let replayed = replayField(prior.fields[0], prior);
+          if (!replayed && prior.fields[1]) {
+            replayed = replayField(prior.fields[1], prior);
+            const prefix = facebookFieldPrefix(prior.fields[0].prefixSamples);
+            if (
+              prefix !== null &&
+              prefix !== facebookFieldPrefix(prior.fields[1].prefixSamples)
+            )
+              replayed = null;
+            const full = facebookFullCellReading(prior.fields);
+            if (full) replayed = caseLine(full, prior, true);
+          }
+          const usedFields =
+            prior.caseNumber &&
+            (!prior.profiles?.length || prior.fullCellReading);
+          if (
+            (!usedFields && !replayed) ||
+            (replayed &&
+              facebookCaseNumber(replayed.words[0].text) ===
+                facebookCaseNumber(prior.caseNumber))
+          ) {
+            review.rows.push(structuredClone(prior));
+            review.detected++;
+            if (prior.caseNumber) review.confirmed++;
+            else review.unresolved++;
+            continue;
+          }
+          if (replayed) {
+            removeRow(columnIndex, prior, height);
+            removeRow(fullIndex, prior, height);
+            const lines = restoreFacebookColumnBoxes([replayed], prior);
+            for (const [key, boxes] of Object.entries(
+              indexFacebookCases(lines, width, height),
+            ))
+              columnIndex[key] = [...(columnIndex[key] || []), ...boxes];
+            review.rows.push({
+              ...structuredClone(prior),
+              caseNumber: lines[0].words[0].text,
+              fullCellReading: replayed.fullCellReading,
+            });
+            review.detected++;
+            review.confirmed++;
+            continue;
+          }
+          // Revalidate saved raw readings without repeating every full-page or
+          // cell read. Only a changed decision needs fresh fallback OCR.
+          removeRow(columnIndex, prior, height);
+          removeRow(fullIndex, prior, height);
+        }
+        const { priorReview: ignoredReview, ...unreviewed } = original;
+        const row = await input.fitCell(bytes, unreviewed);
         const cells = readings.map((lines) => facebookTableLines(lines, row));
         const line = cells.length ? combineFacebookRow(...cells) : null;
         const known = Object.values(columnIndex)
@@ -240,6 +333,11 @@ try {
             binary.line = null;
           record.fields = [field.trace, binary.trace];
           field = binary;
+          const full = facebookFullCellReading(record.fields);
+          if (full) {
+            field.line = caseLine(full, row, true);
+            record.fullCellReading = true;
+          }
         } else record.fields = [field.trace];
         const cell =
           field.line || (await recognizeRow(bytes, row, true, record.profiles));

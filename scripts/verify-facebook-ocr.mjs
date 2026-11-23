@@ -21,6 +21,7 @@ const pipelineFiles = [
   "server/infrastructure/facebook-image-filter.mjs",
   "server/domain/facebook-identifier-fields.mjs",
   "server/infrastructure/facebook-identifier-reader.mjs",
+  "server/domain/facebook-full-cell.mjs",
 ];
 async function fingerprint() {
   const hash = createHash("sha256");

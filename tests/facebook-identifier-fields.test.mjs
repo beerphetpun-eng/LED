@@ -77,3 +77,33 @@ test("numeric-only cases require explicit empty-prefix evidence and cannot becom
     null,
   );
 });
+
+test("a clipped field cannot override a corroborated full-cell digit or a different full-cell prefix", () => {
+  const ordinary = {
+    ...readings(),
+    electronicSamples: [false, false],
+    prefixSamples: ["ผบ", "ผบ", "ผบ"],
+    numberSamples: [
+      { model: "eng", text: "9477/62" },
+      { model: "tha", text: "9477/62" },
+    ],
+    full: ["ผบ19477/62", "Hu19477/62", "19477/62"],
+  };
+  assert.equal(facebookFieldConsensus(ordinary), null);
+  assert.equal(
+    facebookFieldConsensus({
+      ...readings(),
+      prefixSamples: ["ผบ", "พบ", "พบ", "พบ"],
+      full: ["ผบ2569767", "IE2569/67", "E2569/67"],
+    }),
+    null,
+  );
+  assert.equal(
+    facebookFieldConsensus({
+      ...readings(),
+      prefixSamples: ["ผบ", "ผบ", "ผบ"],
+      full: ["ผบ6675766", "HUE6757/66", "E6757/66"],
+    }),
+    "ผบE6757/66",
+  );
+});
