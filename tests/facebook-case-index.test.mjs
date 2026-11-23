@@ -89,7 +89,7 @@ test("rebuilding ignores the old cache that discarded E and caches every shared 
   });
   const albums = [{ expectedPhotos: 2, images: photos }];
   assert.deepEqual(await index.rebuild(albums), { total: 2, checked: 2 });
-  assert.equal(saved.get(photos[0].url).version, 2);
+  assert.equal(saved.get(photos[0].url).version, 3);
   const plain = await index.forAlbums(albums, "ผบ.1066/2560");
   const electronic = await index.forAlbums(albums, "ผบE.1066/2560");
   assert.deepEqual(

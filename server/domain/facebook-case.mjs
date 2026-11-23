@@ -1,4 +1,4 @@
-export const facebookCaseVersion = 2;
+export const facebookCaseVersion = 3;
 
 const normalize = (text) =>
   text
@@ -9,18 +9,68 @@ const normalize = (text) =>
 
 export function facebookCaseNumber(caseNumber) {
   const parts = normalize(caseNumber || "").match(
-    /^([\p{L}]+)(\d+)\/(\d{4})$/u,
+    /^([\p{L}]*)(\d+)\/(\d{2}|\d{4})$/u,
   );
-  return parts ? `${parts[1]}${parts[2]}/${parts[3]}` : null;
+  if (parts) return `${parts[1]}${parts[2]}${parts[3].slice(-2)}`;
+  return /^[\p{L}]+\d{3,}$/u.test(normalize(caseNumber || ""))
+    ? normalize(caseNumber)
+    : null;
 }
 
 export function findFacebookCaseBoxes(index, caseNumber) {
   const key = facebookCaseNumber(caseNumber);
   if (!key || !index) return [];
-  const short = key.replace(/\/(\d{2})(\d{2})$/, "/$2");
-  const lookup = (rows) => [...(rows?.[key] || []), ...(rows?.[short] || [])];
+  const lookup = (rows) =>
+    Object.entries(rows || {}).flatMap(([stored, boxes]) =>
+      stored === key || facebookCaseNumber(stored) === key ? boxes : [],
+    );
   const column = lookup(index.column);
   return column.length ? column : lookup(index.fullPage);
+}
+
+export function combineFacebookRow(thaiLines, latinLines, numberLines) {
+  const symbolsOf = (lines) =>
+    lines
+      .flatMap((line) => line.words.flatMap((word) => word.symbols || [word]))
+      .filter((symbol) => normalize(symbol.text));
+  const thai = [];
+  for (const symbol of symbolsOf(thaiLines)) {
+    if (!/^[ก-ฮ]+$/.test(normalize(symbol.text))) break;
+    thai.push(symbol);
+  }
+  if (!thai.length) return null;
+  const suffix = normalize(numberLines.map((line) => line.text).join(""));
+  if (!/^E?\d+(?:\/(?:\d{2}|\d{4}))?$/.test(suffix)) return null;
+  const right = Math.max(...thai.map((symbol) => symbol.bbox.x1));
+  const latin = symbolsOf(latinLines);
+  const firstNumber = latin.find(
+    (symbol) => /^\d$/.test(symbol.text) && symbol.bbox.x0 >= right - 3,
+  );
+  const electronic = latin.some(
+    (symbol) =>
+      symbol.text.toUpperCase() === "E" &&
+      symbol.bbox.x0 >= right - 3 &&
+      (!firstNumber || symbol.bbox.x0 < firstNumber.bbox.x0),
+  );
+  if (suffix.startsWith("E") !== electronic) return null;
+  const text = thai.map((symbol) => normalize(symbol.text)).join("") + suffix;
+  if (!facebookCaseNumber(text)) return null;
+  const boxes = [...thai, ...symbolsOf(numberLines)].map(
+    (symbol) => symbol.bbox,
+  );
+  return {
+    words: [
+      {
+        text,
+        bbox: {
+          x0: Math.min(...boxes.map((box) => box.x0)),
+          y0: Math.min(...boxes.map((box) => box.y0)),
+          x1: Math.max(...boxes.map((box) => box.x1)),
+          y1: Math.max(...boxes.map((box) => box.y1)),
+        },
+      },
+    ],
+  };
 }
 
 export function indexFacebookCases(lines, width, height) {
@@ -35,9 +85,11 @@ export function indexFacebookCases(lines, width, height) {
         for (let i = 0; i < value.length; i++) boxes.push(symbol.bbox);
       }
     }
-    for (const match of text.matchAll(/([\p{L}]+)(\d+)\/(\d{2,4})(?!\d)/gu)) {
-      const [, photoPrefix, photoNumber, photoYear] = match;
-      if (photoYear.length === 3) continue;
+    for (const match of text.matchAll(
+      /[\p{L}]+\d+(?:\/\d{2,4})?(?![\d/])|(?<![\p{L}\d])\d+\/\d{2,4}(?!\d)/gu,
+    )) {
+      const key = facebookCaseNumber(match[0]);
+      if (!key) continue;
       const symbols = boxes.slice(match.index, match.index + match[0].length);
       const left = Math.max(0, Math.min(...symbols.map((b) => b.x0)) - 2);
       const top = Math.max(0, Math.min(...symbols.map((b) => b.y0)) - 2);
@@ -47,7 +99,6 @@ export function indexFacebookCases(lines, width, height) {
         Math.max(...symbols.map((b) => b.y1)) + 2,
       );
       if (right > left && bottom > top) {
-        const key = `${photoPrefix}${photoNumber}/${photoYear}`;
         (matches[key] ||= []).push({
           x: left / width,
           y: top / height,

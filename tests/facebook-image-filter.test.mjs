@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { caseBoxes } from "../server/domain/facebook-case.mjs";
+import {
+  caseBoxes,
+  facebookCaseNumber,
+  combineFacebookRow,
+} from "../server/domain/facebook-case.mjs";
 import { filterFacebookImages } from "../server/infrastructure/facebook-image-filter.mjs";
 
 test("matches Thai digits and short Buddhist years without matching another case prefix or number", () => {
@@ -24,6 +28,7 @@ test("preserves E as part of the case prefix while normalizing punctuation and B
     ["พ.1854 / 2563", ["พ1854/63", "พ.1854/63"]],
     ["ผบ.1066 / 2560", ["ผบ1066/60", "ผบ.1066/60"]],
     ["ผบE.1066 / 2560", ["ผบE1066/60", "ผบ.E1066/60", "ผบe.1066/2560"]],
+    ["ผบE.670 / 2567", ["ผบE670/67", "ผบ.E 670 / 67", "ผบE67067"]],
   ]) {
     for (const text of examples)
       assert.equal(
@@ -50,6 +55,36 @@ test("preserves E as part of the case prefix while normalizing punctuation and B
     ),
     [],
   );
+});
+
+test("compact case keys remove punctuation and spaces, shorten the year and retain E", () => {
+  assert.equal(facebookCaseNumber("ผบE.670 / 2567"), "ผบE67067");
+  assert.equal(facebookCaseNumber("ผบE670/67"), "ผบE67067");
+  assert.equal(facebookCaseNumber("ผบE67067"), "ผบE67067");
+  assert.equal(facebookCaseNumber("ผบ.670/2567"), "ผบ67067");
+  assert.equal(facebookCaseNumber("37 / 2559"), "3759");
+});
+
+test("colored-row readings require independently observed E after the Thai prefix", () => {
+  const make = (text, x0, x1) => ({ text, bbox: { x0, x1, y0: 30, y1: 60 } });
+  const lines = (symbols, text) => [
+    { text, words: [{ symbols, bbox: { x0: 0, x1: 180, y0: 30, y1: 60 } }] },
+  ];
+  const thai = lines(
+    [make("ผ", 0, 15), make("บ", 16, 30), make("6", 32, 45)],
+    "ผบ6670767",
+  );
+  const english = lines(
+    [make("H", 0, 15), make("U", 16, 30), make("E", 32, 45), make("6", 46, 59)],
+    "HUE6T0/67",
+  );
+  const numbers = lines([make("E", 0, 45), make("670/67", 46, 180)], "E670/67");
+  const joined = combineFacebookRow(thai, english, numbers);
+  assert.equal(joined.words[0].text, "ผบE670/67");
+  assert.equal(caseBoxes([joined], "ผบE.670/2567", 300, 100).length, 1);
+  assert.equal(caseBoxes([joined], "ผบ.670/2567", 300, 100).length, 0);
+  const unconfirmed = lines([make("E", 0, 30), make("6", 46, 59)], "E670/67");
+  assert.equal(combineFacebookRow(thai, unconfirmed, numbers), null);
 });
 
 test("filters across posts when there is a match and keeps every image otherwise", async () => {
