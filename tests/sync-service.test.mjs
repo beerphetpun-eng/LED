@@ -6,6 +6,7 @@ const settings = {
   enabled: true,
   intervalHours: 168,
   retention: "manual",
+  duplicatePolicy: "skip_unchanged",
   scopes: [{ provinceCode: "50", districtCodes: ["5001", "5002"] }],
 };
 function setup(
@@ -24,6 +25,9 @@ function setup(
     getSettings: async () => saved,
     saveSettings: async (s) => {
       saved = s;
+    },
+    saveRetention: async (retention) => {
+      saved = { ...saved, retention };
     },
     getState: async (k, d) => states[k] || d,
     setState: async (k, d) => {
@@ -113,6 +117,41 @@ async function waitFor(s, status) {
   }
   throw Error("did not enter " + status);
 }
+
+test("saving expiry policy preserves sync scopes and schedules without starting collection", async () => {
+  const t = setup();
+  t.states.sync_runtime = { nextRunAt: "2026-11-27T12:00:00Z" };
+  const before = structuredClone(await t.options.repository.getSettings());
+  const result = await t.service.retention("bookmarked");
+  assert.deepEqual(result, { ...before, retention: "bookmarked" });
+  assert.deepEqual(await t.options.repository.getSettings(), result);
+  assert.equal(t.states.sync_runtime.nextRunAt, "2026-11-27T12:00:00Z");
+  assert.equal(t.extracts, 0);
+  assert.equal(t.cleanups, 0);
+  assert.equal(t.service.status().running, false);
+  await assert.rejects(t.service.retention("invalid"));
+  assert.equal(
+    (await t.options.repository.getSettings()).retention,
+    "bookmarked",
+  );
+});
+
+test("expiry policy save excludes concurrent source work and releases its lock", async () => {
+  const t = setup();
+  let release;
+  t.options.repository.saveRetention = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  const pending = t.service.retention("engaged");
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(t.service.start(), /กำลังทำงาน/);
+  await assert.rejects(t.service.retention("manual"), /งานปัจจุบัน/);
+  release();
+  await pending;
+  t.options.repository.saveRetention = async () => {};
+  await t.service.retention("manual");
+});
 
 test("manual deed refresh rechecks only the selected property and preserves complete prior evidence", async () => {
   const calls = [];

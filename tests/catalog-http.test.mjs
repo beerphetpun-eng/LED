@@ -25,6 +25,41 @@ function send(url, headers, method = "GET", body) {
   });
 }
 
+test("expiry settings have an independent guarded endpoint", async (t) => {
+  const received = [];
+  const app = createCatalogHttp({
+    repository: {},
+    sync: {
+      retention: async (value) => {
+        received.push(value);
+        return { retention: value };
+      },
+    },
+    root: process.cwd(),
+    evidencePath: process.cwd(),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const url = `http://127.0.0.1:${server.address().port}/api/sync/retention`;
+  const body = JSON.stringify({ retention: "bookmarked" });
+  const denied = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  assert.equal(denied.status, 403);
+  assert.deepEqual(received, []);
+  const saved = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Land-Radar": "1" },
+    body,
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(await saved.json(), { retention: "bookmarked" });
+  assert.deepEqual(received, ["bookmarked"]);
+});
+
 test("database outages preserve server identity and malformed JSON stays out of alerts", async (t) => {
   const messages = [];
   const app = createCatalogHttp({

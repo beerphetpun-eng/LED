@@ -512,6 +512,21 @@ export function createSyncService({
       if (checked.scopes.length) await service.start(false, true);
       return checked;
     },
+    async retention(value) {
+      if (stopping || running || savingSettings || manualRefresh)
+        throw Error("กรุณารอให้งานปัจจุบันเสร็จก่อนบันทึก");
+      savingSettings = true;
+      try {
+        const checked = validateSettings(
+          { ...(await db.getSettings()), retention: value },
+          geography,
+        );
+        await db.saveRetention(checked.retention);
+        return checked;
+      } finally {
+        savingSettings = false;
+      }
+    },
     async start(geoOnly = false, automatic = false) {
       if (stopping || running || savingSettings || manualRefresh)
         throw Error("มีงานซิงค์ รีเฟรชรูป หรือรีเฟรชโฉนดกำลังทำงานอยู่");

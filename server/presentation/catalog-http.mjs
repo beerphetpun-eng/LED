@@ -80,6 +80,9 @@ export function createCatalogHttp({
   app.put("/api/sync/settings", async (req, res) =>
     res.json(await sync.settings(req.body)),
   );
+  app.put("/api/sync/retention", async (req, res) =>
+    res.json(await sync.retention(req.body?.retention)),
+  );
   app.post("/api/sync/start", async (req, res) => res.json(await sync.start()));
   app.post("/api/sync/geocode", async (req, res) =>
     res.json(await sync.start(true)),
